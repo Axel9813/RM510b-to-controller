@@ -5,7 +5,6 @@ All paths are resolved relative to the directory that contains this file.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -36,7 +35,6 @@ DEFAULT_PROFILE: dict[str, Any] = {
         "leftWheel":   {"action": "vjoy_axis",   "axis": "Z"},
         "rightWheel":  {"action": "vjoy_axis",   "axis": "RZ"},
         "record":      {"action": "vjoy_button", "button": 1},
-        "shutter":     {"action": "vjoy_button", "button": 3},
         "fiveDUp":     {"action": "vjoy_button", "button": 4},
         "fiveDDown":   {"action": "vjoy_button", "button": 5},
         "fiveDLeft":   {"action": "vjoy_button", "button": 6},

@@ -18,7 +18,6 @@ const ConfigEditor = (() => {
     leftWheel: { label: "L-Wheel", source: "hid", type: "axis" },
     rightWheel: { label: "R-Wheel", source: "hid", type: "axis" },
     record: { label: "Record (L-Trig)", source: "hid", type: "button" },
-    shutter: { label: "Shutter full (HID)", source: "hid", type: "button" },
     fiveDUp: { label: "5D Up", source: "hid", type: "button" },
     fiveDDown: { label: "5D Down", source: "hid", type: "button" },
     fiveDLeft: { label: "5D Left", source: "hid", type: "button" },

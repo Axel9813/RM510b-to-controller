@@ -643,19 +643,16 @@ const RCV = (() => {
     const shutterHalf = !!(pico & 0x004); // bit 2
     const shutterFull = !!(pico & 0x200); // bit 9
 
-    // Right trigger: HID shutter (full-press, bit 3 byte 16) OR Pico shutter_full
-    // Half-press (yellow) only shown when Pico is connected and full is not pressed
-    const shutterHidFull = !!s.shutter;
-    const rtrigFull = shutterHidFull || shutterFull;
-    setTrigger("rtrig", rtrigFull ? 1 : shutterHalf ? 0.5 : 0);
-    setActive("rtrig", rtrigFull, !shutterHidFull); // pico-colour when from Pico only
+    // Right trigger: Pico shutter_full (full-press) and shutter_half (half-press)
+    setTrigger("rtrig", shutterFull ? 1 : shutterHalf ? 0.5 : 0);
+    setActive("rtrig", shutterFull, true);
 
     // Shutter half-press bar (yellow, Pico only) — active only between half and full
     const halfBar = refs["rtrig_half_bar"];
     if (halfBar) {
       halfBar.setAttribute(
         "width",
-        shutterHalf && !rtrigFull ? refs["rtrig_bar_maxw"] / 2 : 0,
+        shutterHalf && !shutterFull ? refs["rtrig_bar_maxw"] / 2 : 0,
       );
     }
 

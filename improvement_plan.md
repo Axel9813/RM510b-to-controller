@@ -26,20 +26,15 @@ Fixes:
    - Updated PC frontend `setVJoyStatus()` to show error reason next to the status pill (e.g. "vJoy: inactive (pyvjoy not installed)").
    - The green/red status dot in the frontend header was already present — now it shows the error reason when inactive.
 
-2. Shutter stage 1 clearly being captured by Android app itself not by Raspberry, I think both should be handled by one way (Raspberry).
+2. ~~DONE~~ Shutter stage 1 clearly being captured by Android app itself not by Raspberry, I think both should be handled by one way (Raspberry).
 
-   **Root cause analysis:**
-   - Shutter full-press is captured from HID byte 16 bit 3 in `RcState.kt` (Android app, via USB HID).
-   - Pico captures `shutter_half` (bitmask bit 2) and `shutter_full` (bitmask bit 9) from dedicated GPIO buttons.
-   - Two separate input sources exist for shutter, causing potential conflicts and inconsistent behaviour.
-
-   **Plan of approach:**
-   - [ ] Remove `shutter` from `RcState.kt` HID parsing (byte 16 bit 3) — it will no longer be sent from the Android side.
-   - [ ] Ensure the Pico's `shutter_half` and `shutter_full` GPIO pins are properly wired and mapped in config.json.
-   - [ ] Update `config_manager.py` default profile: remove old `"shutter"` HID mapping, keep only `pico_shutter_half` and `pico_shutter_full`.
-   - [ ] Update `input_router.py` `HID_BUTTON_FIELDS` to remove `"shutter"`.
-   - [ ] Update the web frontend visualizer to show both shutter states from Pico source.
-   - [ ] Document which buttons come from HID vs Pico in the README.
+   **What was done:**
+   - Removed `shutter` field from `RcState.kt` — no longer parsed from HID byte 16 bit 3, no longer in `toMap()`.
+   - Removed `"shutter"` from `HID_BUTTON_FIELDS` in `input_router.py`.
+   - Removed `"shutter"` mapping from default profile in `config_manager.py`.
+   - Removed `"shutter"` entry from frontend `config_editor.js` field catalog.
+   - Updated `rc_visualizer.js` right trigger display to use only Pico `shutter_half` (bit 2) and `shutter_full` (bit 9), removed HID shutter OR-merge.
+   - Shutter is now exclusively handled by the Pico via `pico_shutter_half` and `pico_shutter_full` GPIO inputs.
 
 3. Outputs of elements placed on customizable interface not being displayed correctly on frontend monitor.
 

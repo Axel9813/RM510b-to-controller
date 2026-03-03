@@ -31,7 +31,6 @@ AXIS_FIELDS: frozenset[str] = frozenset({
 # Button fields available via USB HID (Phase 1)
 HID_BUTTON_FIELDS: frozenset[str] = frozenset({
     "record",
-    "shutter",
     "fiveDUp", "fiveDDown", "fiveDLeft", "fiveDRight", "fiveDCenter",
 })
 
