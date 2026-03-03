@@ -1,0 +1,4 @@
+python/server/__pycache__/
+
+python/server/config/profiles/
+python/server/config/profiles/!default.json
