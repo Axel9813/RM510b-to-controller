@@ -14,10 +14,11 @@ import android.util.Log
  *
  * Frame format: [0xAA] [bitmask_low] [bitmask_high]
  *
- * The Pico appears as a USB CDC ACM device with VID 0x2E8A.
- * PID varies by firmware config (0x0005 = CDC only, 0x0009 = CDC+MSC, etc.).
- * We match VID only, then claim the CDC **data** interface (class 0x0A)
- * and read from its bulk IN endpoint.
+ * Handles two Pico states:
+ *   PID 0x0003 — RP2 Boot (BOOTSEL mode): sends PICOBOOT reboot command
+ *                to force the Pico into application (MicroPython) mode.
+ *   PID 0x0005+ — MicroPython CDC: claims the CDC Data interface (class 0x0A)
+ *                 and reads bitmask frames from its bulk IN endpoint.
  */
 class PicoUsbReader(
     private val usbManager: UsbManager,
@@ -26,10 +27,11 @@ class PicoUsbReader(
 ) {
     companion object {
         private const val TAG = "PicoUsbReader"
-        private const val VID = 0x2E8A  // Raspberry Pi
-        // Match VID only — PID varies: 0x0005 (CDC), 0x0009 (CDC+MSC), etc.
+        private const val VID = 0x2E8A          // Raspberry Pi
+        private const val PID_BOOTSEL = 0x0003  // RP2 Boot (BOOTSEL mode)
         private const val SYNC_BYTE = 0xAA
         private const val READ_TIMEOUT_MS = 100
+        private const val DISCONNECT_THRESHOLD = 50 // consecutive -1 reads → treat as disconnected (~5s)
     }
 
     @Volatile
@@ -41,7 +43,6 @@ class PicoUsbReader(
     val isRunning: Boolean get() = running
 
     fun findDevice(): UsbDevice? {
-        // Log all USB devices for diagnostics
         for (device in usbManager.deviceList.values) {
             Log.d(TAG, "USB device on bus: VID=${device.vendorId.toString(16)} " +
                     "PID=${device.productId.toString(16)} name=${device.deviceName} " +
@@ -52,12 +53,120 @@ class PicoUsbReader(
         }
     }
 
+    /**
+     * Check if the Pico is in BOOTSEL (boot ROM) mode.
+     */
+    fun isBootselMode(device: UsbDevice): Boolean {
+        return device.vendorId == VID && device.productId == PID_BOOTSEL
+    }
+
+    /**
+     * Send PICOBOOT reboot command to exit BOOTSEL mode.
+     *
+     * The RP2040 boot ROM exposes a vendor-specific interface (class 0xFF)
+     * called PICOBOOT. Commands are sent as 32-byte structures via the
+     * bulk OUT endpoint. We send a REBOOT command (0x02) to make the Pico
+     * boot into the flashed application (MicroPython).
+     *
+     * Returns true if the command was sent successfully.
+     */
+    fun rebootFromBootsel(device: UsbDevice): Boolean {
+        if (!usbManager.hasPermission(device)) {
+            Log.w(TAG, "No permission to reboot Pico from BOOTSEL")
+            return false
+        }
+
+        // Find the PICOBOOT vendor interface (class 0xFF)
+        var picobootIface: UsbInterface? = null
+        for (i in 0 until device.interfaceCount) {
+            val iface = device.getInterface(i)
+            if (iface.interfaceClass == UsbConstants.USB_CLASS_VENDOR_SPEC) {
+                picobootIface = iface
+                break
+            }
+        }
+        if (picobootIface == null) {
+            Log.w(TAG, "No PICOBOOT interface found on BOOTSEL device")
+            return false
+        }
+
+        val outEp = findBulkOutEndpoint(picobootIface)
+        if (outEp == null) {
+            Log.w(TAG, "No bulk OUT endpoint on PICOBOOT interface")
+            return false
+        }
+
+        val conn = usbManager.openDevice(device) ?: run {
+            Log.e(TAG, "Failed to open BOOTSEL device")
+            return false
+        }
+
+        try {
+            conn.claimInterface(picobootIface, true)
+
+            val inEp = findBulkInEndpoint(picobootIface)
+
+            // Helper: build a 32-byte PICOBOOT command
+            fun makeCmd(cmdId: Int, cmdSize: Int, token: Int): ByteArray {
+                val cmd = ByteArray(32)
+                cmd[0] = 0x0b; cmd[1] = 0xd1.toByte(); cmd[2] = 0x1f; cmd[3] = 0x43 // magic
+                cmd[4] = (token and 0xFF).toByte() // dToken
+                cmd[8] = cmdId.toByte()            // bCmdId
+                cmd[9] = cmdSize.toByte()          // bCmdSize
+                return cmd
+            }
+
+            // Helper: send command and read ACK (PICOBOOT requires reading status after each cmd)
+            fun sendCmd(cmd: ByteArray, label: String): Boolean {
+                val sent = conn.bulkTransfer(outEp, cmd, cmd.size, 2000)
+                Log.d(TAG, "PICOBOOT: $label OUT=$sent bytes")
+                if (inEp != null) {
+                    val ack = ByteArray(24)
+                    val ackLen = conn.bulkTransfer(inEp, ack, ack.size, 2000)
+                    Log.d(TAG, "PICOBOOT: $label ACK=$ackLen bytes")
+                }
+                return sent == cmd.size
+            }
+
+            // Step 1: EXCLUSIVE_ACCESS (cmdId=0x01) — required before reboot
+            val excl = makeCmd(0x01, 1, 1)
+            excl[16] = 0x01  // bExclusive = true
+            sendCmd(excl, "EXCLUSIVE_ACCESS")
+
+            // Step 2: REBOOT (cmdId=0x02, cmdSize=0x0c)
+            val reboot = makeCmd(0x02, 0x0c, 2)
+            // dPC = 0, dSP = 0 (bytes 16-23 already zero = boot from flash)
+            // dDelay = 500ms (bytes 24-27, little-endian)
+            reboot[24] = 0xF4.toByte()
+            reboot[25] = 0x01
+            val ok = sendCmd(reboot, "REBOOT")
+
+            Log.i(TAG, "PICOBOOT: reboot sequence complete (sent=$ok)")
+            return ok
+        } catch (e: Exception) {
+            Log.e(TAG, "PICOBOOT reboot failed: ${e.message}")
+            return false
+        } finally {
+            try {
+                conn.releaseInterface(picobootIface)
+                conn.close()
+            } catch (_: Exception) {}
+        }
+    }
+
     fun start(): Boolean {
         if (running) return true
 
         val device = findDevice()
         if (device == null) {
             onError("Pico not found (VID:${VID.toString(16)})")
+            return false
+        }
+
+        // If Pico is in BOOTSEL mode, we can't read CDC data.
+        // Return a specific error so PicoPlugin can handle it.
+        if (isBootselMode(device)) {
+            onError("Pico is in BOOTSEL mode (PID:0003) — not running MicroPython")
             return false
         }
 
@@ -75,9 +184,6 @@ class PicoUsbReader(
         }
 
         // Find the CDC Data interface (class 0x0A).
-        // CDC ACM devices typically have two interfaces:
-        //   - CDC Control (class 0x02) — we skip this
-        //   - CDC Data   (class 0x0A) — has bulk IN/OUT endpoints
         val dataIface = findCdcDataInterface(device)
         if (dataIface == null) {
             onError("No CDC Data interface found on Pico")
@@ -102,33 +208,20 @@ class PicoUsbReader(
             return false
         }
 
-        // CDC ACM: set line coding (115200 8N1) and enable DTR
-        // Some MicroPython builds need DTR raised to start sending data.
+        // CDC ACM: enable DTR/RTS
         val ctrlIface = findCdcControlInterface(device)
         if (ctrlIface != null) {
             conn.claimInterface(ctrlIface, true)
-            // SET_CONTROL_LINE_STATE: DTR=1, RTS=1
-            conn.controlTransfer(
-                0x21,  // bmRequestType: host-to-device, class, interface
-                0x22,  // SET_CONTROL_LINE_STATE
-                0x03,  // DTR | RTS
-                ctrlIface.id,
-                null, 0, 100
-            )
+            conn.controlTransfer(0x21, 0x22, 0x03, ctrlIface.id, null, 0, 100)
         }
 
-        // Send Ctrl+C (interrupt) + Ctrl+D (soft reboot) to ensure main.py starts.
-        // If the Pico was left in REPL mode (e.g. after Thonny session), main.py
-        // won't be running. This forces a restart regardless of current state.
+        // Send Ctrl+C + Ctrl+D to ensure main.py starts (in case of REPL mode)
         val outEndpoint = findBulkOutEndpoint(dataIface)
         if (outEndpoint != null) {
-            val reset = byteArrayOf(0x03, 0x03, 0x04)  // Ctrl+C, Ctrl+C, Ctrl+D
+            val reset = byteArrayOf(0x03, 0x03, 0x04)
             val sent = conn.bulkTransfer(outEndpoint, reset, reset.size, 500)
             Log.i(TAG, "Sent soft-reboot sequence ($sent bytes)")
-            // Give MicroPython time to reboot and start main.py (~1.5s)
-            Thread.sleep(1500)
-        } else {
-            Log.w(TAG, "No bulk OUT endpoint — cannot send soft-reboot")
+            Thread.sleep(2000)
         }
 
         connection = conn
@@ -141,17 +234,16 @@ class PicoUsbReader(
         thread = Thread({
             Log.i(TAG, "Read thread started")
             val buffer = ByteArray(bufSize)
-            // Ring buffer for frame parsing (handles partial reads)
             val ring = ByteArray(256)
             var ringLen = 0
             var readCount = 0
+            var consecutiveErrors = 0
             var lastLogTime = System.currentTimeMillis()
 
             while (running) {
                 val bytesRead = conn.bulkTransfer(inEndpoint, buffer, bufSize, READ_TIMEOUT_MS)
                 readCount++
 
-                // Periodic diagnostic log (every 3 seconds)
                 val now = System.currentTimeMillis()
                 if (now - lastLogTime > 3000) {
                     Log.d(TAG, "bulkTransfer stats: reads=$readCount, lastResult=$bytesRead, ringLen=$ringLen")
@@ -165,14 +257,24 @@ class PicoUsbReader(
                     lastLogTime = now
                 }
 
+                if (bytesRead < 0) {
+                    consecutiveErrors++
+                    if (consecutiveErrors >= DISCONNECT_THRESHOLD) {
+                        Log.e(TAG, "USB disconnected ($consecutiveErrors consecutive read failures)")
+                        onError("Pico USB disconnected")
+                        running = false
+                        break
+                    }
+                } else {
+                    consecutiveErrors = 0
+                }
+
                 if (bytesRead > 0) {
-                    // Append to ring buffer
                     val space = ring.size - ringLen
                     val toCopy = minOf(bytesRead, space)
                     System.arraycopy(buffer, 0, ring, ringLen, toCopy)
                     ringLen += toCopy
 
-                    // Parse all complete frames from ring
                     var i = 0
                     while (i + 2 < ringLen) {
                         if ((ring[i].toInt() and 0xFF) == SYNC_BYTE) {
@@ -182,12 +284,10 @@ class PicoUsbReader(
                             onBitmask(bitmask)
                             i += 3
                         } else {
-                            // Not a sync byte — skip to re-sync
                             i++
                         }
                     }
 
-                    // Shift remaining bytes to front of ring
                     if (i > 0 && i < ringLen) {
                         System.arraycopy(ring, i, ring, 0, ringLen - i)
                     }
@@ -214,28 +314,12 @@ class PicoUsbReader(
     }
 
     private fun findCdcDataInterface(device: UsbDevice): UsbInterface? {
+        // Only match CDC Data class (0x0A) — no fallback to vendor-specific.
+        // Vendor-specific interfaces on BOOTSEL devices are PICOBOOT, not CDC.
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
-            // CDC Data class = 0x0A
             if (iface.interfaceClass == 0x0A) {
                 if (findBulkInEndpoint(iface) != null) return iface
-            }
-        }
-        // Fallback: vendor-specific (0xFF) interface with bulk IN.
-        // Explicitly skip COMM (0x02), HID (0x03), MSC (0x08) to avoid
-        // claiming the wrong interface when Pico exposes mass storage.
-        val skipClasses = setOf(
-            UsbConstants.USB_CLASS_COMM,       // 0x02
-            UsbConstants.USB_CLASS_HID,        // 0x03
-            UsbConstants.USB_CLASS_MASS_STORAGE // 0x08
-        )
-        for (i in 0 until device.interfaceCount) {
-            val iface = device.getInterface(i)
-            if (iface.interfaceClass !in skipClasses) {
-                if (findBulkInEndpoint(iface) != null) {
-                    Log.w(TAG, "Using fallback interface $i class=0x${iface.interfaceClass.toString(16)}")
-                    return iface
-                }
             }
         }
         return null
@@ -244,7 +328,6 @@ class PicoUsbReader(
     private fun findCdcControlInterface(device: UsbDevice): UsbInterface? {
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
-            // CDC Control class = 0x02
             if (iface.interfaceClass == UsbConstants.USB_CLASS_COMM) {
                 return iface
             }

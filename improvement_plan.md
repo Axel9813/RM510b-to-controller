@@ -1,22 +1,19 @@
 Fixes:
 
-0. ! Pico input not being captured reliably (sometimes shows connected status but not capturing inputs at all).
+0. ~~DONE~~ Pico input not being captured reliably (sometimes shows connected status but not capturing inputs at all).
 
-   **Root cause analysis:**
-   - PicoPlugin reports `connected=true` based on `reader.isRunning` which is set BEFORE the read thread receives any data. Status is misleading.
-   - No data-loss detection: if main.py crashes or stops sending, the read loop silently returns 0 bytes forever while still reporting "connected".
-   - `sys.stdout.buffer` may not exist on all MicroPython builds — if it throws `AttributeError`, main.py crashes silently.
-   - Soft-reboot sequence (Ctrl+C Ctrl+D) has a fixed 1.5s sleep that may be too short for some Pico boards.
-   - No verification that main.py actually started after the soft-reboot.
-   - The fallback interface selector in `findCdcDataInterface` was previously matching mass storage interfaces (fixed, but related).
-
-   **Plan of approach:**
-   - [ ] Change PicoPlugin to only report `connected` after the first valid bitmask frame is received, not when `isRunning` is set.
-   - [ ] Add heartbeat detection in the read thread: if no data received for 5 seconds, attempt device re-open or trigger a new soft-reboot.
-   - [ ] Make the Pico send a known "READY" frame (e.g. `0xAA 0xFF 0xFF`) on startup before entering the main loop, and wait for it on Android side.
-   - [ ] Increase soft-reboot wait from 1.5s to 2.5s.
-   - [ ] In main.py, unify the write method: use `sys.stdout.write(bytes)` directly (works on all MicroPython builds), remove `.buffer` dependency.
-   - [ ] Add thread-safe shutdown: check `running` flag after each `bulkTransfer` before accessing shared state.
+   **What was done:**
+   - Diagnosed root cause: Pico was entering BOOTSEL mode (PID 0x0003) on the RC's USB port, so MicroPython never ran (confirmed via LED test and ADB USB enumeration).
+   - Implemented PICOBOOT reboot protocol in `PicoUsbReader.rebootFromBootsel()` — sends EXCLUSIVE_ACCESS + REBOOT commands via bulk OUT on the vendor-specific interface (class 0xFF), reads ACK from bulk IN.
+   - Added BOOTSEL recovery loop in `PicoPlugin.handleStartWithBootselRecovery()` — retries up to 5 times with 4s waits between PICOBOOT reboots.
+   - Removed unsafe vendor-class fallback in `findCdcDataInterface()` that was matching PICOBOOT/mass-storage interfaces instead of CDC Data (class 0x0A).
+   - Added soft-reboot sequence (Ctrl+C + Ctrl+D via bulk OUT) to restart main.py if Pico is stuck in REPL mode.
+   - Added CDC ACM DTR/RTS line activation for proper serial handshake.
+   - Fixed `sys.stdout.buffer` portability in main.py: `_write = getattr(sys.stdout, 'buffer', sys.stdout).write`.
+   - Added crash recovery in main.py: try/except around `main()` that prints error to CDC then does `machine.soft_reset()`.
+   - Fixed duplicate reader thread race condition: added `synchronized(startLock)` guard and `@Volatile` on reader field, stale readers stopped before new start.
+   - Added USB disconnect detection: 50 consecutive `-1` bulkTransfer results (~5s) triggers stop + error callback instead of spinning forever.
+   - Removed broken CircuitPython `import storage` from boot.py (MicroPython-only now).
 
 1. vJoy not capturing output of app. In frontend stick movements and button presses are visible but they are not reaching vJoy.
 
