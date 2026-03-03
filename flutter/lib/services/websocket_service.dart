@@ -33,7 +33,8 @@ class WebSocketService extends ChangeNotifier {
   static const Duration _pongTimeout = Duration(seconds: 25);
 
   // Incoming message stream
-  final _incomingController = StreamController<Map<String, dynamic>>.broadcast();
+  final _incomingController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   // Outgoing state (set externally, sent at 50 Hz)
   Map<String, dynamic>? _pendingState;
@@ -65,19 +66,22 @@ class WebSocketService extends ChangeNotifier {
 
       debugPrint('[WS Server] Listening on 0.0.0.0:$port');
 
-      _httpServer!.listen((HttpRequest request) {
-        if (WebSocketTransformer.isUpgradeRequest(request)) {
-          _handleUpgrade(request);
-        } else {
-          // Not a WebSocket request — return 426
-          request.response
-            ..statusCode = HttpStatus.upgradeRequired
-            ..write('WebSocket upgrade required')
-            ..close();
-        }
-      }, onError: (error) {
-        debugPrint('[WS Server] HTTP server error: $error');
-      });
+      _httpServer!.listen(
+        (HttpRequest request) {
+          if (WebSocketTransformer.isUpgradeRequest(request)) {
+            _handleUpgrade(request);
+          } else {
+            // Not a WebSocket request — return 426
+            request.response
+              ..statusCode = HttpStatus.upgradeRequired
+              ..write('WebSocket upgrade required')
+              ..close();
+          }
+        },
+        onError: (error) {
+          debugPrint('[WS Server] HTTP server error: $error');
+        },
+      );
     } catch (e) {
       _status = ConnectionStatus.error;
       _error = 'Failed to start server: $e';
@@ -193,7 +197,9 @@ class WebSocketService extends ChangeNotifier {
     final lastPong = _lastPong;
     if (lastPong != null &&
         DateTime.now().difference(lastPong) > _pongTimeout) {
-      debugPrint('[WS Server] No response for ${_pongTimeout.inSeconds}s — declaring dead');
+      debugPrint(
+        '[WS Server] No response for ${_pongTimeout.inSeconds}s — declaring dead',
+      );
       _onClientDisconnected('Connection timed out (no response)');
       return;
     }
@@ -205,10 +211,7 @@ class WebSocketService extends ChangeNotifier {
   void _sendHello() {
     final elements = _helloElements;
     if (elements == null) return;
-    _sendRaw({
-      'type': 'hello',
-      'elements': elements,
-    });
+    _sendRaw({'type': 'hello', 'elements': elements});
   }
 
   bool _sendRaw(Map<String, dynamic> data) {
@@ -219,7 +222,9 @@ class WebSocketService extends ChangeNotifier {
     } catch (e) {
       _sendFailures++;
       if (_sendFailures >= _maxSendFailures) {
-        debugPrint('[WS Server] $_sendFailures consecutive send failures — declaring dead');
+        debugPrint(
+          '[WS Server] $_sendFailures consecutive send failures — declaring dead',
+        );
         _onClientDisconnected('Send failed: $e');
       }
       return false;

@@ -4,6 +4,7 @@
 
 Flutter app running on a DJI RM510B remote controller (Android 10, ARM64).
 Collects input from:
+
 1. **RC's own USB HID joystick** — sticks, wheels, 5D joystick, record/shutter buttons
 2. **Raspberry Pi Pico** (via USB, stub for now) — C1, C2, pause, home, shutter half-press,
    3-position switch, "circle" button, "arrow" button
@@ -56,9 +57,9 @@ the configurable on-screen interface elements.
 dependencies:
   flutter:
     sdk: flutter
-  web_socket_channel: ^3.0.1      # WebSocket client
-  shared_preferences: ^2.3.0      # Persistent layout storage
-  provider: ^6.1.2                # State management
+  web_socket_channel: ^3.0.1 # WebSocket client
+  shared_preferences: ^2.3.0 # Persistent layout storage
+  provider: ^6.1.2 # State management
 ```
 
 `dart:io` (built-in) is used for UDP discovery (`RawDatagramSocket`).
@@ -151,6 +152,7 @@ compileOptions {
 
 The Pico is not yet available (awaiting delivery). The app will include a
 `PicoService` stub that:
+
 - Exposes the same interface that the real implementation will use
 - Returns a zeroed `PicoState` bitmask at all times
 - Logs a "Pico not connected" status visible in Settings tab
@@ -173,6 +175,7 @@ Bits 9–15 reserved
 ```
 
 Switch decoding: bits 5 and 6 encode position 1 / 2 / 3:
+
 - `00` → position 2 (neither shorted)
 - `01` → position 1 (pin 1 shorted)
 - `10` → position 3 (pin 2 shorted)
@@ -184,15 +187,15 @@ firmware. Intent:
 
 ```json
 {
-  "C1":              { "pin": 2,  "active_low": true },
-  "C2":              { "pin": 3,  "active_low": true },
-  "shutter_half":    { "pin": 4,  "active_low": true },
-  "pause":           { "pin": 5,  "active_low": true },
-  "return_to_home":  { "pin": 6,  "active_low": true },
-  "switch_pos1":     { "pin": 7,  "active_low": true },
-  "switch_pos3":     { "pin": 8,  "active_low": true },
-  "circle":          { "pin": 9,  "active_low": true },
-  "arrow":           { "pin": 10, "active_low": true }
+  "C1": { "pin": 2, "active_low": true },
+  "C2": { "pin": 3, "active_low": true },
+  "shutter_half": { "pin": 4, "active_low": true },
+  "pause": { "pin": 5, "active_low": true },
+  "return_to_home": { "pin": 6, "active_low": true },
+  "switch_pos1": { "pin": 7, "active_low": true },
+  "switch_pos3": { "pin": 8, "active_low": true },
+  "circle": { "pin": 9, "active_low": true },
+  "arrow": { "pin": 10, "active_low": true }
 }
 ```
 
@@ -209,20 +212,20 @@ Exact HID vs CDC-ACM behaviour will be determined on arrival.
 {
   "type": "rc_state",
   "seq": 1234,
-  "stickLeftH":   0,
-  "stickLeftV":   0,
-  "stickRightH":  0,
-  "stickRightV":  0,
-  "leftWheel":    0,
-  "rightWheel":   0,
-  "record":       false,
-  "shutter":      false,
-  "fiveDUp":      false,
-  "fiveDDown":    false,
-  "fiveDLeft":    false,
-  "fiveDRight":   false,
-  "fiveDCenter":  false,
-  "picoBitmask":  0
+  "stickLeftH": 0,
+  "stickLeftV": 0,
+  "stickRightH": 0,
+  "stickRightV": 0,
+  "leftWheel": 0,
+  "rightWheel": 0,
+  "record": false,
+  "shutter": false,
+  "fiveDUp": false,
+  "fiveDDown": false,
+  "fiveDLeft": false,
+  "fiveDRight": false,
+  "fiveDCenter": false,
+  "picoBitmask": 0
 }
 ```
 
@@ -263,11 +266,13 @@ Used to drive LED/light elements on the interface screen:
 Port 8766 UDP. Magic prefix: `DJI_RC_DISCOVER|`
 
 **RC → broadcast 255.255.255.255:8766:**
+
 ```
 DJI_RC_DISCOVER|{"type":"discover"}
 ```
 
 **Server → unicast back to RC:**
+
 ```
 DJI_RC_DISCOVER|{"type":"dji_rc_server","name":"MyPC","port":8765,"ips":["192.168.1.10"]}
 ```
@@ -352,7 +357,7 @@ When open, the screen is divided into a visible grid of equal squares.
 ### Element Default Sizes (in grid cells)
 
 | Element | Width | Height |
-|---------|-------|--------|
+| ------- | ----- | ------ |
 | Button  | 3     | 2      |
 | Slider  | 6     | 2      |
 | LED     | 2     | 2      |
@@ -377,7 +382,7 @@ All sizes will be configurable in the options menu in future iterations.
    - Options menu appears:
      - **Rename** — inline text field for display name.
      - **Move** — element follows next grid-cell tap.
-     - *(future: change color, resize)*
+     - _(future: change color, resize)_
      - **Delete** — removes element.
 
 4. **Placing a new element:**
@@ -390,12 +395,14 @@ All sizes will be configurable in the options menu in future iterations.
 ### Rendered Element Descriptions
 
 **Button** — Displays `displayName`. Sends to server on press/release:
+
 ```json
 { "type": "element_event", "id": "btn_xxx", "event": "press" }
 { "type": "element_event", "id": "btn_xxx", "event": "release" }
 ```
 
 **Slider** — Displays `displayName` + current value. Sends on change:
+
 ```json
 { "type": "element_event", "id": "sld_xxx", "event": "change", "value": 0.73 }
 ```
@@ -409,6 +416,7 @@ State is set by `element_update` messages from the server.
 ## Data Models (Dart)
 
 ### `RcState`
+
 ```dart
 class RcState {
   final int stickLeftH, stickLeftV, stickRightH, stickRightV;
@@ -420,6 +428,7 @@ class RcState {
 ```
 
 ### `InterfaceElement` (sealed)
+
 ```dart
 sealed class InterfaceElement {
   final String id;
@@ -434,6 +443,7 @@ class LedElement     extends InterfaceElement { bool currentState = false; }
 ```
 
 ### `AppLayout`
+
 ```dart
 class AppLayout {
   final List<InterfaceElement> elements;
@@ -502,6 +512,7 @@ android/app/src/main/res/xml/
 Goal: data flows end-to-end from RC sticks to PC vJoy.
 
 **1.1 Android/Kotlin — USB HID reader**
+
 - [ ] `RcState.kt` data class
 - [ ] `RcUsbReader.kt`: find VID:0x2CA3/PID:0x1501, request permission,
       claimInterface(force=true), read thread, parse 18-byte packet
@@ -511,6 +522,7 @@ Goal: data flows end-to-end from RC sticks to PC vJoy.
 - [ ] `build.gradle.kts` updates (minSdk=26, arm64, Java 17)
 
 **1.2 Dart services**
+
 - [ ] `RcStateService`: subscribe EventChannel, expose `Stream<RcState>`
 - [ ] `PicoService` (stub): returns zero bitmask, exposes status string
 - [ ] `DiscoveryService`: UDP broadcast scan, returns `List<ServerEntry>`
@@ -519,12 +531,14 @@ Goal: data flows end-to-end from RC sticks to PC vJoy.
 - [ ] `LayoutStorageService`: load/save `AppLayout` JSON
 
 **1.3 Basic UI**
+
 - [ ] `main.dart` / `app.dart`: dark theme, TabBar shell
 - [ ] `settings_tab.dart`: RC status, Pico stub status, server discovery,
       connect/disconnect, "Open Interface Builder" button
 - [ ] `interface_tab.dart`: empty clean canvas + ⚙ FAB
 
 **1.4 Data models**
+
 - [ ] All model classes with `toMap()` / `fromMap()` / `toJson()` / `fromJson()`
 
 ---
@@ -532,16 +546,19 @@ Goal: data flows end-to-end from RC sticks to PC vJoy.
 ### Phase 2 — Interface Builder
 
 **2.1 Grid + layout engine**
+
 - [ ] `grid_painter.dart`: draw grid lines when builder is open
 - [ ] Snap-to-grid utility functions
 - [ ] Collision detection (no element overlap)
 
 **2.2 Element widgets**
+
 - [ ] `button_element_widget.dart`
 - [ ] `slider_element_widget.dart`
 - [ ] `led_element_widget.dart` — subscribes to server `element_update` messages
 
 **2.3 Builder overlay**
+
 - [ ] `builder_overlay.dart`: slide-up panel
 - [ ] `element_picker.dart`: Button / Slider / LED choice
 - [ ] `element_options_menu.dart`: rename, move, delete

@@ -75,23 +75,24 @@ All messages are JSON text frames.
 #### RC → Server
 
 **`rc_state`** (50 Hz, every 20 ms)
+
 ```json
 {
-  "type":          "rc_state",
-  "seq":           12345,
-  "stickLeftH":    -330,
-  "stickLeftV":    0,
-  "stickRightH":   660,
-  "stickRightV":   0,
-  "leftWheel":     0,
-  "rightWheel":    128,
-  "record":        false,
-  "fiveDUp":       false,
-  "fiveDDown":     false,
-  "fiveDLeft":     false,
-  "fiveDRight":    false,
-  "fiveDCenter":   false,
-  "picoBitmask":   0
+  "type": "rc_state",
+  "seq": 12345,
+  "stickLeftH": -330,
+  "stickLeftV": 0,
+  "stickRightH": 660,
+  "stickRightV": 0,
+  "leftWheel": 0,
+  "rightWheel": 128,
+  "record": false,
+  "fiveDUp": false,
+  "fiveDDown": false,
+  "fiveDLeft": false,
+  "fiveDRight": false,
+  "fiveDCenter": false,
+  "picoBitmask": 0
 }
 ```
 
@@ -99,33 +100,42 @@ Stick / wheel range: **−660 … +660** (raw HID values).
 `picoBitmask` is a 16-bit integer; bit positions are defined below.
 
 **`element_event`** — fired when user interacts with a screen element
+
 ```json
 {
-  "type":       "element_event",
-  "event":      "press",
+  "type": "element_event",
+  "event": "press",
   "element_id": "btn_gimbal_up",
-  "value":      null
+  "value": null
 }
 ```
+
 `event` values: `press`, `release`, `change` (slider).  
 `value` is `null` for buttons, `0.0–1.0` for sliders.
 
 **`hello`** — sent once immediately after WebSocket connection is established
+
 ```json
 {
   "type": "hello",
   "elements": [
     {
-      "type":        "button",
-      "id":          "btn_gimbal_up",
+      "type": "button",
+      "id": "btn_gimbal_up",
       "displayName": "Gimbal Up",
-      "gridX": 0, "gridY": 0, "gridW": 3, "gridH": 2
+      "gridX": 0,
+      "gridY": 0,
+      "gridW": 3,
+      "gridH": 2
     },
     {
-      "type":        "led",
-      "id":          "led_record",
+      "type": "led",
+      "id": "led_record",
       "displayName": "Recording",
-      "gridX": 3, "gridY": 0, "gridW": 2, "gridH": 2
+      "gridX": 3,
+      "gridY": 0,
+      "gridW": 2,
+      "gridH": 2
     }
   ]
 }
@@ -134,21 +144,23 @@ Stick / wheel range: **−660 … +660** (raw HID values).
 #### Server → RC
 
 **`elements_full_state`** — sent on connect and after `hello`
+
 ```json
 {
-  "type":   "elements_full_state",
+  "type": "elements_full_state",
   "states": {
-    "led_record":   true,
+    "led_record": true,
     "btn_gimbal_up": false
   }
 }
 ```
 
 **`element_update`** — sent when a single element's LED state changes
+
 ```json
 {
-  "type":  "element_update",
-  "id":    "led_record",
+  "type": "element_update",
+  "id": "led_record",
   "state": true
 }
 ```
@@ -160,40 +172,50 @@ Stick / wheel range: **−660 … +660** (raw HID values).
 #### Server → Browser
 
 **`initial_state`** — sent once on connect
+
 ```json
 {
-  "type":           "initial_state",
-  "rc_connected":   false,
-  "vjoy_active":    true,
-  "rc_state":       {},
-  "registry":       {},
+  "type": "initial_state",
+  "rc_connected": false,
+  "vjoy_active": true,
+  "rc_state": {},
+  "registry": {},
   "active_profile": "default",
-  "profiles":       ["default"]
+  "profiles": ["default"]
 }
 ```
 
 **`monitor_update`** — broadcast at **20 Hz**
+
 ```json
 {
-  "type":         "monitor_update",
+  "type": "monitor_update",
   "rc_connected": true,
-  "vjoy_active":  true,
-  "rc_state":     { "stickLeftH": -330, "picoBitmask": 3, "..." : "..." }
+  "vjoy_active": true,
+  "rc_state": { "stickLeftH": -330, "picoBitmask": 3, "...": "..." }
 }
 ```
 
 **`registry_update`** — pushed when Flutter `hello` adds new elements
+
 ```json
 {
-  "type":     "registry_update",
-  "registry": { "btn_gimbal_up": { "name": "Gimbal Up", "element_type": "button", "action": {} } }
+  "type": "registry_update",
+  "registry": {
+    "btn_gimbal_up": {
+      "name": "Gimbal Up",
+      "element_type": "button",
+      "action": {}
+    }
+  }
 }
 ```
 
 **`profile_changed`** — pushed after a profile switch
+
 ```json
 {
-  "type":    "profile_changed",
+  "type": "profile_changed",
   "profile": "fpv-mode"
 }
 ```
@@ -202,18 +224,18 @@ Stick / wheel range: **−660 … +660** (raw HID values).
 
 ## picoBitmask Bit Positions
 
-| Bit | Field name           | Physical control             |
-|-----|----------------------|------------------------------|
-| 0   | `pico_c1`            | C1 button (top-left row)     |
-| 1   | `pico_c2`            | C2 button (top-right row)    |
-| 2   | `pico_shutter_half`  | Shutter half-press (AF)      |
-| 3   | `pico_pause`         | Pause button (Row 4)         |
-| 4   | `pico_rth`           | A / RTH button (Row 4)       |
-| 5   | `pico_switch_f`      | F-N-S switch → F position    |
-| 6   | `pico_switch_s`      | F-N-S switch → S position    |
-| 7   | `pico_circle`        | Circle button (Row 2)        |
-| 8   | `pico_arrow`         | Arrow (↕) button (Row 2)      |
-| 9   | `pico_shutter_full`  | Shutter full-press           |
+| Bit | Field name          | Physical control          |
+| --- | ------------------- | ------------------------- |
+| 0   | `pico_c1`           | C1 button (top-left row)  |
+| 1   | `pico_c2`           | C2 button (top-right row) |
+| 2   | `pico_shutter_half` | Shutter half-press (AF)   |
+| 3   | `pico_pause`        | Pause button (Row 4)      |
+| 4   | `pico_rth`          | A / RTH button (Row 4)    |
+| 5   | `pico_switch_f`     | F-N-S switch → F position |
+| 6   | `pico_switch_s`     | F-N-S switch → S position |
+| 7   | `pico_circle`       | Circle button (Row 2)     |
+| 8   | `pico_arrow`        | Arrow (↕) button (Row 2)  |
+| 9   | `pico_shutter_full` | Shutter full-press        |
 
 N position = both bits 5 and 6 are 0.
 
@@ -224,34 +246,35 @@ bit 9 fires on full-press.
 
 ## REST API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET  | `/`                              | Serve `frontend/index.html` |
-| GET  | `/static/<file>`                 | Serve frontend static assets |
-| GET  | `/api/status`                    | RC connection, vJoy status, active profile, mappings, elements |
-| GET  | `/api/profiles`                  | List profiles + active name |
-| POST | `/api/profiles`                  | Create profile `{name, clone_from?, data?}` |
-| GET  | `/api/profiles/{name}`           | Export profile JSON |
-| PUT  | `/api/profiles/{name}`           | Overwrite profile JSON |
-| DELETE | `/api/profiles/{name}`         | Delete profile (not "default") |
-| POST | `/api/profiles/{name}/activate`  | Switch active profile |
-| GET  | `/api/config/mappings`           | Get input_mappings for active profile |
-| POST / PATCH | `/api/config/mappings`   | Replace / merge input_mappings |
-| GET  | `/api/config/elements`           | Get element_registry for active profile |
-| PATCH | `/api/config/elements`          | Bulk-update element entries |
-| POST | `/api/config/elements/{id}`      | Update single element entry |
-| POST | `/api/outputs/{id}/toggle`       | Toggle LED state → `{id, state, value}` |
-| POST | `/api/outputs/{id}/set`          | Set LED state `{value: true/false}` |
+| Method       | Path                            | Description                                                    |
+| ------------ | ------------------------------- | -------------------------------------------------------------- |
+| GET          | `/`                             | Serve `frontend/index.html`                                    |
+| GET          | `/static/<file>`                | Serve frontend static assets                                   |
+| GET          | `/api/status`                   | RC connection, vJoy status, active profile, mappings, elements |
+| GET          | `/api/profiles`                 | List profiles + active name                                    |
+| POST         | `/api/profiles`                 | Create profile `{name, clone_from?, data?}`                    |
+| GET          | `/api/profiles/{name}`          | Export profile JSON                                            |
+| PUT          | `/api/profiles/{name}`          | Overwrite profile JSON                                         |
+| DELETE       | `/api/profiles/{name}`          | Delete profile (not "default")                                 |
+| POST         | `/api/profiles/{name}/activate` | Switch active profile                                          |
+| GET          | `/api/config/mappings`          | Get input_mappings for active profile                          |
+| POST / PATCH | `/api/config/mappings`          | Replace / merge input_mappings                                 |
+| GET          | `/api/config/elements`          | Get element_registry for active profile                        |
+| PATCH        | `/api/config/elements`          | Bulk-update element entries                                    |
+| POST         | `/api/config/elements/{id}`     | Update single element entry                                    |
+| POST         | `/api/outputs/{id}/toggle`      | Toggle LED state → `{id, state, value}`                        |
+| POST         | `/api/outputs/{id}/set`         | Set LED state `{value: true/false}`                            |
 
 ---
 
 ## Config Files
 
 ### `config/server.json`
+
 ```json
 {
-  "ws_port":        8765,
-  "http_port":      8080,
+  "ws_port": 8765,
+  "http_port": 8080,
   "discovery_port": 8766,
   "vjoy_device_id": 1,
   "active_profile": "default"
@@ -259,24 +282,25 @@ bit 9 fires on full-press.
 ```
 
 ### `config/profiles/<name>.json`
+
 ```json
 {
   "profile_name": "default",
   "input_mappings": {
-    "stickLeftH": { "action": "vjoy_axis",   "axis": "X" },
-    "stickLeftV": { "action": "vjoy_axis",   "axis": "Y", "invert": true },
-    "record":     { "action": "vjoy_button", "button": 1 },
+    "stickLeftH": { "action": "vjoy_axis", "axis": "X" },
+    "stickLeftV": { "action": "vjoy_axis", "axis": "Y", "invert": true },
+    "record": { "action": "vjoy_button", "button": 1 },
     "pico_shutter_half": { "action": "vjoy_button", "button": 2 },
     "pico_shutter_full": { "action": "vjoy_button", "button": 3 },
-    "pico_c1":    { "action": "key",         "keys": ["ctrl", "shift", "h"] },
-    "fiveDUp":    { "action": "none" }
+    "pico_c1": { "action": "key", "keys": ["ctrl", "shift", "h"] },
+    "fiveDUp": { "action": "none" }
   },
   "element_registry": {
     "btn_gimbal_up": {
-      "name":         "Gimbal Up",
+      "name": "Gimbal Up",
       "element_type": "button",
-      "action":       { "type": "vjoy_button", "button_id": 10 },
-      "state":        false
+      "action": { "type": "vjoy_button", "button_id": 10 },
+      "state": false
     }
   }
 }
@@ -317,10 +341,10 @@ The server replies (unicast back to sender) with:
 
 ```json
 {
-  "type":    "server",
-  "ips":     ["192.168.1.10"],
+  "type": "server",
+  "ips": ["192.168.1.10"],
   "ws_port": 8765,
-  "name":    "DJI-RC-Server"
+  "name": "DJI-RC-Server"
 }
 ```
 

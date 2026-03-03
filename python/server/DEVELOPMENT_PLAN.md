@@ -3,6 +3,7 @@
 ## Overview
 
 A Python server running on a PC that:
+
 1. Accepts a persistent WebSocket connection from the RC Flutter app
 2. Receives all RC input state at 50 Hz and routes it to vJoy / system actions / custom outputs
 3. Serves a web configuration frontend (FastAPI + vanilla HTML/JS, opened in any browser)
@@ -12,17 +13,18 @@ A Python server running on a PC that:
 
 ## Technology Stack
 
-| Concern         | Choice                    | Reason                                    |
-|-----------------|---------------------------|-------------------------------------------|
-| HTTP + WS server| FastAPI + uvicorn         | Async, serves both REST and WS            |
-| WebSocket       | FastAPI WebSocket         | Built-in, same event loop as HTTP         |
-| UDP discovery   | asyncio DatagramProtocol  | Same event loop, no extra deps            |
-| vJoy            | pyvjoy                    | Proven in POC (see dji_rc_knowledge/main.py) |
-| System actions  | pynput                    | Cross-platform keyboard / media keys      |
-| Config storage  | JSON files (config/)      | Human-readable, easy to hand-edit         |
-| Frontend        | Vanilla HTML + JS         | Served as static files from FastAPI       |
+| Concern          | Choice                   | Reason                                       |
+| ---------------- | ------------------------ | -------------------------------------------- |
+| HTTP + WS server | FastAPI + uvicorn        | Async, serves both REST and WS               |
+| WebSocket        | FastAPI WebSocket        | Built-in, same event loop as HTTP            |
+| UDP discovery    | asyncio DatagramProtocol | Same event loop, no extra deps               |
+| vJoy             | pyvjoy                   | Proven in POC (see dji_rc_knowledge/main.py) |
+| System actions   | pynput                   | Cross-platform keyboard / media keys         |
+| Config storage   | JSON files (config/)     | Human-readable, easy to hand-edit            |
+| Frontend         | Vanilla HTML + JS        | Served as static files from FastAPI          |
 
 Install:
+
 ```
 pip install fastapi uvicorn websockets pyvjoy pynput
 ```
@@ -79,36 +81,36 @@ Input availability summary:
 
 **Input field → UI label mapping:**
 
-| JSON field      | Display name       | Input type       | Visual region  |
-|-----------------|--------------------|------------------|----------------|
-| stickLeftH      | Left Stick H       | axis ±660        | Row 4 L-stick  |
-| stickLeftV      | Left Stick V       | axis ±660        | Row 4 L-stick  |
-| stickRightH     | Right Stick H      | axis ±660        | Row 4 R-stick  |
-| stickRightV     | Right Stick V      | axis ±660        | Row 4 R-stick  |
-| leftWheel       | Left Wheel         | axis ±660        | Row 2 left     |
-| rightWheel      | Right Wheel        | axis ±660        | Row 2 right    |
-| record          | Record             | button           | Row 1 L-trigger|
-| shutter         | Shutter (full)     | button           | Row 1 R-trigger|
-| fiveDUp         | 5D Up              | button           | Row 4 centre   |
-| fiveDDown       | 5D Down            | button           | Row 4 centre   |
-| fiveDLeft       | 5D Left            | button           | Row 4 centre   |
-| fiveDRight      | 5D Right           | button           | Row 4 centre   |
-| fiveDCenter     | 5D Center          | button           | Row 4 centre   |
-| picoBitmask b0  | C1                 | button (Pico)    | Row 3          |
-| picoBitmask b1  | C2                 | button (Pico)    | Row 3          |
-| picoBitmask b2  | Shutter (half)     | button (Pico)    | Row 1 R-trigger|
-| picoBitmask b3  | Pause              | button (Pico)    | Row 4 centre   |
-| picoBitmask b4  | RTH [A]            | button (Pico)    | Row 4 centre   |
-| picoBitmask b5  | Switch F           | switch (Pico)    | Row 5          |
-| picoBitmask b6  | Switch S           | switch (Pico)    | Row 5          |
-| picoBitmask b7  | Circle             | button (Pico)    | Row 3          |
-| picoBitmask b8  | Arrow              | button (Pico)    | Row 3          |
+| JSON field     | Display name   | Input type    | Visual region   |
+| -------------- | -------------- | ------------- | --------------- |
+| stickLeftH     | Left Stick H   | axis ±660     | Row 4 L-stick   |
+| stickLeftV     | Left Stick V   | axis ±660     | Row 4 L-stick   |
+| stickRightH    | Right Stick H  | axis ±660     | Row 4 R-stick   |
+| stickRightV    | Right Stick V  | axis ±660     | Row 4 R-stick   |
+| leftWheel      | Left Wheel     | axis ±660     | Row 2 left      |
+| rightWheel     | Right Wheel    | axis ±660     | Row 2 right     |
+| record         | Record         | button        | Row 1 L-trigger |
+| shutter        | Shutter (full) | button        | Row 1 R-trigger |
+| fiveDUp        | 5D Up          | button        | Row 4 centre    |
+| fiveDDown      | 5D Down        | button        | Row 4 centre    |
+| fiveDLeft      | 5D Left        | button        | Row 4 centre    |
+| fiveDRight     | 5D Right       | button        | Row 4 centre    |
+| fiveDCenter    | 5D Center      | button        | Row 4 centre    |
+| picoBitmask b0 | C1             | button (Pico) | Row 3           |
+| picoBitmask b1 | C2             | button (Pico) | Row 3           |
+| picoBitmask b2 | Shutter (half) | button (Pico) | Row 1 R-trigger |
+| picoBitmask b3 | Pause          | button (Pico) | Row 4 centre    |
+| picoBitmask b4 | RTH [A]        | button (Pico) | Row 4 centre    |
+| picoBitmask b5 | Switch F       | switch (Pico) | Row 5           |
+| picoBitmask b6 | Switch S       | switch (Pico) | Row 5           |
+| picoBitmask b7 | Circle         | button (Pico) | Row 3           |
+| picoBitmask b8 | Arrow          | button (Pico) | Row 3           |
 
 Elements from Flutter app arrive as `element_event` messages:
-| field + context | Display name        | Input type        |
+| field + context | Display name | Input type |
 |-----------------|---------------------|-------------------|
-| id + press      | \<user-defined name> | button press/rel  |
-| id + change     | \<user-defined name> | slider 0.0–1.0    |
+| id + press | \<user-defined name> | button press/rel |
+| id + change | \<user-defined name> | slider 0.0–1.0 |
 
 ---
 
@@ -117,22 +119,30 @@ Elements from Flutter app arrive as `element_event` messages:
 ### Received from RC
 
 **`rc_state`** (50 Hz):
+
 ```json
 {
   "type": "rc_state",
   "seq": 1234,
-  "stickLeftH": 0, "stickLeftV": 0,
-  "stickRightH": 0, "stickRightV": 0,
-  "leftWheel": 0, "rightWheel": 0,
-  "record": false, "shutter": false,
-  "fiveDUp": false, "fiveDDown": false,
-  "fiveDLeft": false, "fiveDRight": false,
+  "stickLeftH": 0,
+  "stickLeftV": 0,
+  "stickRightH": 0,
+  "stickRightV": 0,
+  "leftWheel": 0,
+  "rightWheel": 0,
+  "record": false,
+  "shutter": false,
+  "fiveDUp": false,
+  "fiveDDown": false,
+  "fiveDLeft": false,
+  "fiveDRight": false,
   "fiveDCenter": false,
   "picoBitmask": 0
 }
 ```
 
 **`element_event`** (on user interaction with a Flutter-side element):
+
 ```json
 { "type": "element_event", "id": "btn_xxx", "event": "press" }
 { "type": "element_event", "id": "btn_xxx", "event": "release" }
@@ -142,13 +152,18 @@ Elements from Flutter app arrive as `element_event` messages:
 ### Sent to RC
 
 **`element_update`** (sent whenever an output value changes):
+
 ```json
 { "type": "element_update", "id": "my_led_01", "value": true }
 ```
 
 **`elements_full_state`** (sent immediately on new connection):
+
 ```json
-{ "type": "elements_full_state", "states": { "my_led_01": true, "my_led_02": false } }
+{
+  "type": "elements_full_state",
+  "states": { "my_led_01": true, "my_led_02": false }
+}
 ```
 
 ---
@@ -169,6 +184,7 @@ DJI_RC_DISCOVER|{"type":"dji_rc_server","name":"<hostname>","port":8765,"ips":["
 Configuration is split into two layers:
 
 ### `config/server.json` — server-level settings (not part of any profile)
+
 ```json
 {
   "ws_port": 8765,
@@ -187,35 +203,36 @@ switched from the frontend without restarting the server.
 The active profile name is stored in `server.json`.
 
 **Full profile schema:**
+
 ```json
 {
   "profile_name": "default",
   "input_mappings": {
-    "stickLeftH":   { "action": "vjoy_axis",   "axis": "X"  },
-    "stickLeftV":   { "action": "vjoy_axis",   "axis": "Y",  "invert": true },
-    "stickRightH":  { "action": "vjoy_axis",   "axis": "RX" },
-    "stickRightV":  { "action": "vjoy_axis",   "axis": "RY", "invert": true },
-    "leftWheel":    { "action": "vjoy_axis",   "axis": "Z"  },
-    "rightWheel":   { "action": "vjoy_axis",   "axis": "RZ" },
-    "record":       { "action": "vjoy_button", "button": 1  },
-    "shutter":      { "action": "vjoy_button", "button": 2  },
-    "fiveDUp":      { "action": "vjoy_button", "button": 3  },
-    "fiveDDown":    { "action": "vjoy_button", "button": 4  },
-    "fiveDLeft":    { "action": "vjoy_button", "button": 5  },
-    "fiveDRight":   { "action": "vjoy_button", "button": 6  },
-    "fiveDCenter":  { "action": "vjoy_button", "button": 7  },
-    "pico_c1":      { "action": "vjoy_button", "button": 8  },
-    "pico_c2":      { "action": "vjoy_button", "button": 9  },
-    "pico_pause":   { "action": "system",      "fn": "media_play_pause" },
-    "pico_rth":     { "action": "key",         "keys": ["ctrl", "shift", "h"] },
-    "pico_circle":  { "action": "none" },
-    "pico_arrow":   { "action": "none" }
+    "stickLeftH": { "action": "vjoy_axis", "axis": "X" },
+    "stickLeftV": { "action": "vjoy_axis", "axis": "Y", "invert": true },
+    "stickRightH": { "action": "vjoy_axis", "axis": "RX" },
+    "stickRightV": { "action": "vjoy_axis", "axis": "RY", "invert": true },
+    "leftWheel": { "action": "vjoy_axis", "axis": "Z" },
+    "rightWheel": { "action": "vjoy_axis", "axis": "RZ" },
+    "record": { "action": "vjoy_button", "button": 1 },
+    "shutter": { "action": "vjoy_button", "button": 2 },
+    "fiveDUp": { "action": "vjoy_button", "button": 3 },
+    "fiveDDown": { "action": "vjoy_button", "button": 4 },
+    "fiveDLeft": { "action": "vjoy_button", "button": 5 },
+    "fiveDRight": { "action": "vjoy_button", "button": 6 },
+    "fiveDCenter": { "action": "vjoy_button", "button": 7 },
+    "pico_c1": { "action": "vjoy_button", "button": 8 },
+    "pico_c2": { "action": "vjoy_button", "button": 9 },
+    "pico_pause": { "action": "system", "fn": "media_play_pause" },
+    "pico_rth": { "action": "key", "keys": ["ctrl", "shift", "h"] },
+    "pico_circle": { "action": "none" },
+    "pico_arrow": { "action": "none" }
   },
   "element_registry": {
     "btn_1234": {
       "display_name": "Boost",
       "element_type": "button",
-      "on_press":   { "action": "key", "keys": ["shift"] },
+      "on_press": { "action": "key", "keys": ["shift"] },
       "on_release": { "action": "none" }
     },
     "sld_5678": {
@@ -234,6 +251,7 @@ The active profile name is stored in `server.json`.
 ```
 
 Notes on `element_registry`:
+
 - Entries are **created automatically** when the RC app connects and sends a
   `hello` message listing all elements configured in the Flutter layout.
 - New elements are added with `action: none` / `trigger: manual`; existing
@@ -244,15 +262,16 @@ Notes on `element_registry`:
 - `trigger` values: `"manual"` (frontend toggle) or `"rule"` (future).
 
 Supported `action` values for `input_mappings` and `element_registry`:
-| action         | extra fields                    | description                          |
+| action | extra fields | description |
 |----------------|---------------------------------|--------------------------------------|
-| `none`         | —                               | input ignored                        |
-| `vjoy_axis`    | `axis`, `invert?`               | map to a vJoy axis                   |
-| `vjoy_button`  | `button` (1-128)                | map to a vJoy button                 |
-| `key`          | `keys` (list of key names)      | send keyboard combo via pynput       |
-| `system`       | `fn`                            | system function (see list below)     |
+| `none` | — | input ignored |
+| `vjoy_axis` | `axis`, `invert?` | map to a vJoy axis |
+| `vjoy_button` | `button` (1-128) | map to a vJoy button |
+| `key` | `keys` (list of key names) | send keyboard combo via pynput |
+| `system` | `fn` | system function (see list below) |
 
 Supported `fn` values for `system` action:
+
 ```
 media_play_pause, media_next, media_prev,
 volume_up, volume_down, volume_mute
@@ -274,6 +293,7 @@ def rc_to_vjoy(value: int, invert: bool = False) -> int:
 ```
 
 vJoy axis name → pyvjoy constant:
+
 ```
 X  → HID_USAGE_X     RX → HID_USAGE_RX
 Y  → HID_USAGE_Y     RY → HID_USAGE_RY
@@ -322,6 +342,7 @@ Two sections/tabs:
 Shows a stylised top-down SVG diagram of the RC with live input animation.
 
 **SVG RC layout (proportional to the photo):**
+
 ```
 ┌────────────────────────────────────────────────────┐
 │  [LTrig]                            [RTrig ½/●]   │
@@ -339,6 +360,7 @@ Shows a stylised top-down SVG diagram of the RC with live input animation.
 
 Each element in the SVG responds to live WebSocket state from the server's
 internal broadcast:
+
 - Sticks: a dot moves inside a circle proportional to axis values
 - Wheels: an arc needle rotates
 - Buttons: highlighted when pressed (CSS class toggle)
@@ -354,12 +376,14 @@ which pushes `rc_state` messages at the current live rate.
 Three collapsible sections:
 
 **1. Input → Action Mapping**
+
 - Table: one row per input. Columns: Input name / Current action / [Edit button]
 - Edit opens a modal with a dropdown for action type + fields for that type
 - "Save" button writes to `/api/config/input_mappings`
 - Note: Pico inputs shown in a separate sub-section, greyed out until Pico connects
 
 **2. Output (RC Screen Elements) + Element Registry**
+
 - Combined section: lists all elements registered in the active profile's
   `element_registry`.
 - Elements are populated automatically when the RC app connects and sends a
@@ -371,6 +395,7 @@ Three collapsible sections:
 - Future: "Add rule" button per LED entry opens a rule editor.
 
 **3. Profile Management**
+
 - Shows the currently active profile name
 - Dropdown to switch between existing profiles (hot-reloads router + output manager)
 - [New Profile] button — clones current profile under a new name
@@ -415,15 +440,18 @@ in-place without restarting the server.
 ## Module Responsibilities
 
 ### `main.py`
+
 - Reads `config/server.json`
 - Starts asyncio UDP discovery responder
 - Starts uvicorn (FastAPI) with configured ports
 - Initialises vJoy device; logs warning if vJoy not installed
 
 ### `server.py` (FastAPI app)
+
 Two WebSocket endpoints on the same server:
 
 `/ws/rc` — RC device connection:
+
 - Authenticates magic hello message (optional, simple token)
 - Passes `rc_state` to `InputRouter.process(state)` on each frame
 - Passes `element_event` to `OutputManager.handle_element_event(event)`
@@ -431,10 +459,12 @@ Two WebSocket endpoints on the same server:
 - Maintains a reference used by `OutputManager.push_to_rc(msg)`
 
 `/ws/monitor` — browser monitor connection:
+
 - Receives last `rc_state` from a shared variable, pushes at ~20 Hz to browser
   (rate-limited so browser doesn't get overwhelmed)
-  
+
 ### `input_router.py`
+
 ```python
 class InputRouter:
     def __init__(self, mappings: dict, vjoy: VJoyHandler, sys: SystemActions):
@@ -448,6 +478,7 @@ class InputRouter:
 Keeps previous state copy to detect button edge transitions (press/release).
 
 ### `vjoy_handler.py`
+
 ```python
 class VJoyHandler:
     def start(self, device_id: int) -> bool  # returns False if pyvjoy unavailable
@@ -461,6 +492,7 @@ present), `VJoyHandler` runs in no-op mode and logs warnings. The rest of the
 server continues to function.
 
 ### `system_actions.py`
+
 Uses `pynput.keyboard.Controller` and platform-specific media key codes.
 
 ```python
@@ -471,6 +503,7 @@ class SystemActions:
 ```
 
 ### `output_manager.py`
+
 ```python
 class OutputManager:
     def load(self, profile: dict) -> None  # reads element_registry from active profile
@@ -484,6 +517,7 @@ class OutputManager:
 ```
 
 ### `config_manager.py`
+
 Singleton that manages `server.json` and the `profiles/` directory.
 
 ```python
@@ -503,12 +537,14 @@ Fires a `on_profile_changed` callback so `InputRouter` and `OutputManager`
 hot-reload from the new profile without restarting the server.
 
 ### `discovery.py`
+
 ```python
 class DiscoveryProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
         if data.startswith(b"DJI_RC_DISCOVER|"):
             # parse, respond with server name + IPs + port
 ```
+
 Gets local IPs by connecting a UDP socket to 8.8.8.8 (no packet sent, reads
 socket's own bound address — reliable cross-platform way to find LAN IP).
 
@@ -522,6 +558,7 @@ auto-populate the `element_registry` section of the active profile without
 manual configuration.
 
 This is a small addition to the Flutter `WebSocketService`:
+
 ```dart
 // Sent immediately after WebSocket connection is established:
 channel.sink.add(jsonEncode({
@@ -535,6 +572,7 @@ channel.sink.add(jsonEncode({
 ```
 
 Server `hello` handling sequence:
+
 1. `OutputManager.merge_hello(elements)` — adds any unknown IDs to the active
    profile's `element_registry` with defaults (`action: none`, `trigger: manual`);
    existing entries are left unchanged.
