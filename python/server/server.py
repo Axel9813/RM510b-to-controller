@@ -158,6 +158,7 @@ async def _monitor_broadcast_loop() -> None:
             "type": "monitor_update",
             "rc_connected": _rc_connected,
             "vjoy_active": vjoy.active,
+            "vjoy_error": vjoy.error,
             "rc_state": _last_rc_state,
         })
         await _broadcast_to_monitors(msg)
@@ -222,6 +223,7 @@ async def ws_monitor(websocket: WebSocket) -> None:
         "type": "initial_state",
         "rc_connected": _rc_connected,
         "vjoy_active": vjoy.active,
+        "vjoy_error": vjoy.error,
         "rc_state": _last_rc_state,
         "registry": output_mgr.get_registry(),
         "active_profile": cfg.active_profile_name(),
@@ -262,6 +264,7 @@ async def api_status() -> JSONResponse:
         "rc_connected": _rc_connected,
         "last_seq": _last_seq,
         "vjoy_active": vjoy.active,
+        "vjoy_error": vjoy.error,
         "active_profile": cfg.active_profile_name(),
         "profiles": cfg.list_profiles(),
         "mappings": cfg.input_mappings(),

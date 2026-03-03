@@ -62,6 +62,8 @@ class VJoyHandler:
         self._device = None
         self._device_id: int = 1
         self._active: bool = False
+        self._error: Optional[str] = None
+        self._inactive_warned: bool = False  # log once, not every frame
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -73,16 +75,28 @@ class VJoyHandler:
         Returns True on success, False if vJoy is unavailable.
         """
         self._device_id = device_id
+        self._inactive_warned = False
         if not _PYVJOY_AVAILABLE:
-            log.warning("vJoy start skipped — pyvjoy not installed.")
+            self._error = "pyvjoy not installed"
+            log.warning(
+                "vJoy start skipped — pyvjoy not installed. "
+                "Install: pip install pyvjoy"
+            )
             return False
         try:
             self._device = pyvjoy.VJoyDevice(device_id)  # type: ignore[name-defined]
             self._active = True
+            self._error = None
             log.info("vJoy device %d acquired.", device_id)
             return True
         except Exception as exc:
-            log.error("Failed to acquire vJoy device %d: %s", device_id, exc)
+            self._error = str(exc)
+            log.error(
+                "Failed to acquire vJoy device %d: %s. "
+                "Make sure vJoy driver is installed and device %d is "
+                "configured in vJoyConf.",
+                device_id, exc, device_id,
+            )
             self._device = None
             self._active = False
             return False
@@ -106,12 +120,22 @@ class VJoyHandler:
     def active(self) -> bool:
         return self._active
 
+    @property
+    def error(self) -> Optional[str]:
+        return self._error
+
     # ------------------------------------------------------------------
     # Control
     # ------------------------------------------------------------------
 
     def set_axis(self, axis_name: str, rc_value: int, invert: bool = False) -> None:
         if not self._active or self._device is None:
+            if not self._inactive_warned:
+                self._inactive_warned = True
+                log.warning(
+                    "vJoy not active — axis/button commands will be ignored. "
+                    "Error: %s", self._error or "unknown",
+                )
             return
         axis_const = _AXIS_NAME_MAP.get(axis_name.upper())
         if axis_const is None:
@@ -121,10 +145,16 @@ class VJoyHandler:
         try:
             self._device.set_axis(axis_const, vjoy_val)
         except Exception as exc:
-            log.debug("vJoy set_axis error: %s", exc)
+            log.warning("vJoy set_axis(%s) error: %s", axis_name, exc)
 
     def set_button(self, button_id: int, pressed: bool) -> None:
         if not self._active or self._device is None:
+            if not self._inactive_warned:
+                self._inactive_warned = True
+                log.warning(
+                    "vJoy not active — axis/button commands will be ignored. "
+                    "Error: %s", self._error or "unknown",
+                )
             return
         if not (1 <= button_id <= 128):
             log.warning("vJoy button id %d out of range (1-128)", button_id)
@@ -132,4 +162,4 @@ class VJoyHandler:
         try:
             self._device.set_button(button_id, 1 if pressed else 0)
         except Exception as exc:
-            log.debug("vJoy set_button error: %s", exc)
+            log.warning("vJoy set_button(%d) error: %s", button_id, exc)

@@ -105,12 +105,14 @@
     if (notice) notice.style.display = connected ? "none" : "";
   }
 
-  function setVJoyStatus(active) {
+  function setVJoyStatus(active, error) {
     const dot = document.getElementById("vjoy-status-dot");
     const lbl = document.getElementById("vjoy-status-label");
     if (!dot || !lbl) return;
     dot.className = "status-dot " + (active ? "active" : "warning");
-    lbl.textContent = "vJoy: " + (active ? "active" : "inactive");
+    let text = "vJoy: " + (active ? "active" : "inactive");
+    if (!active && error) text += " (" + error + ")";
+    lbl.textContent = text;
   }
 
   function setProfile(name) {
@@ -189,7 +191,7 @@
       case "initial_state":
         // Sent once on connect: full snapshot
         setRCStatus(msg.rc_connected ?? false);
-        setVJoyStatus(msg.vjoy_active ?? false);
+        setVJoyStatus(msg.vjoy_active ?? false, msg.vjoy_error);
         if (msg.active_profile) setProfile(msg.active_profile);
         if (msg.registry) ConfigEditor.loadRegistry(msg.registry);
         if (msg.rc_state) {
@@ -203,7 +205,7 @@
       case "monitor_update":
         // 20 Hz heartbeat
         setRCStatus(msg.rc_connected ?? false);
-        if (msg.vjoy_active !== undefined) setVJoyStatus(msg.vjoy_active);
+        if (msg.vjoy_active !== undefined) setVJoyStatus(msg.vjoy_active, msg.vjoy_error);
         if (msg.rc_state) {
           _lastRcState = msg.rc_state;
           // Pico connected = picoBitmask is present and non-zero

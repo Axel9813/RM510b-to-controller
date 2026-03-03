@@ -15,22 +15,16 @@ Fixes:
    - Added USB disconnect detection: 50 consecutive `-1` bulkTransfer results (~5s) triggers stop + error callback instead of spinning forever.
    - Removed broken CircuitPython `import storage` from boot.py (MicroPython-only now).
 
-1. vJoy not capturing output of app. In frontend stick movements and button presses are visible but they are not reaching vJoy.
+1. ~~DONE~~ vJoy not capturing output of app. In frontend stick movements and button presses are visible but they are not reaching vJoy.
 
-   **Root cause analysis:**
-   - `vjoy_handler.py` silently does nothing if `self._active` is `False` (device init failed) — both `set_axis` and `set_button` return immediately.
-   - `pyvjoy.VJoyDevice(device_id)` call in `start()` catches all exceptions generically — driver-level failures are masked.
-   - If vJoy driver is not installed, or device is not configured in vJoyConf, or device ID mismatches config, output silently fails.
-   - No status reporting to the frontend about whether vJoy is actually working.
-   - Error logging is at DEBUG level (`log.debug("vJoy set_axis error: %s")`), making issues invisible in normal log output.
-
-   **Plan of approach:**
-   - [ ] Elevate vJoy error logging from DEBUG to WARNING so failures are visible.
-   - [ ] Add a `/api/status` field `vjoy_active` + `vjoy_error` that the frontend can display prominently.
-   - [ ] On startup, if `start()` fails, log a clear actionable message: "vJoy device {id} not available. Install vJoy driver and configure device {id} in vJoyConf."
-   - [ ] Add a self-test after `start()`: write a known axis value and read it back (pyvjoy supports `GetVJDAxisExist` and `GetVJDStatus`).
-   - [ ] Add a visual indicator on the PC frontend (config editor / status bar) showing vJoy connection state (green/red).
-   - [ ] Check if the default profile actually has vjoy_axis/vjoy_button mappings for all RC inputs, and log warnings for unmapped fields.
+   **What was done:**
+   - Elevated all vJoy error logging from DEBUG to WARNING level so `set_axis`/`set_button` failures are visible in normal log output.
+   - Added `_error` field to `VJoyHandler` that stores the failure reason (exposed via `error` property).
+   - Startup `start()` now logs actionable message on failure: "Make sure vJoy driver is installed and device N is configured in vJoyConf."
+   - Added one-time warning when vJoy is inactive and axis/button commands are attempted (logs once, not every frame).
+   - Exposed `vjoy_error` in `/api/status` REST endpoint, monitor WebSocket `initial_state`, and 20Hz `monitor_update` broadcasts.
+   - Updated PC frontend `setVJoyStatus()` to show error reason next to the status pill (e.g. "vJoy: inactive (pyvjoy not installed)").
+   - The green/red status dot in the frontend header was already present — now it shows the error reason when inactive.
 
 2. Shutter stage 1 clearly being captured by Android app itself not by Raspberry, I think both should be handled by one way (Raspberry).
 
