@@ -1,0 +1,145 @@
+Reading RC Stick, Wheel, 5D Button and Record Data
+====================================================
+
+There are two working approaches. Both give sticks, wheels, 5D joystick,
+and record/shutter buttons. Choose ONE — they are alternatives, not layers.
+
+
+APPROACH A: RAW USB HID (Recommended)
+======================================
+
+This is the cleanest approach. No Shizuku, no root, no third-party tools.
+Just the standard Android UsbManager API.
+
+SETUP:
+  1. Find device: iterate UsbManager.getDeviceList(), match VID=0x2CA3 PID=0x1501
+  2. Request USB permission (one-time Android system dialog)
+  3. Open device: usbManager.openDevice(device)
+  4. Claim interface 0 with force=true (this detaches the xpad kernel driver)
+  5. Find the interrupt IN endpoint on interface 0
+  6. Read in a loop: usbConnection.bulkTransfer(epIn, buf, 64, 100)
+
+PACKET FORMAT (18 bytes, confirmed on RM510B):
+  Byte  0:     Report ID — always 0x02
+  Byte  1:     Constant — always 0x0E
+  Bytes 2-3:   Sequence counter (uint16 LE, increments each packet)
+  Bytes 4-5:   Right stick horizontal (uint16 LE, center=0x0400=1024)
+  Bytes 6-7:   Right stick vertical   (uint16 LE, center=0x0400)
+  Bytes 8-9:   Left stick vertical    (uint16 LE, center=0x0400)
+  Bytes 10-11: Left stick horizontal  (uint16 LE, center=0x0400)
+  Bytes 12-13: Left wheel             (uint16 LE, center=0x0400)
+  Bytes 14-15: Right wheel            (uint16 LE, center=0x0400)
+  Bytes 16-17: Button flags           (see below)
+
+  Analog values: center=1024 (0x0400), range roughly 364..1684
+  To get signed: value - 1024 → gives roughly ±660
+
+BUTTON BITFIELD (bytes 16-17, confirmed by testing):
+  Byte 16:
+    bit 2 (0x04) = Record button
+    bit 3 (0x08) = Shutter (full press / 2nd stage)
+  Byte 17:
+    bit 0 (0x01) = 5D Up
+    bit 1 (0x02) = 5D Down
+    bit 2 (0x04) = 5D Left
+    bit 3 (0x08) = 5D Right
+    bit 4 (0x10) = 5D Center (press)
+
+IMPORTANT NOTES:
+  - After claimInterface(force=true), the xpad kernel driver is detached.
+    The device disappears from /dev/input until you release the interface.
+  - Packets arrive at high rate (~100+ Hz). Use bulkTransfer timeout of
+    ~100ms to allow clean shutdown.
+  - bulkTransfer returns -1 on timeout (no data), just continue the loop.
+  - The USB device filter in AndroidManifest.xml auto-triggers permission
+    dialog when device is attached:
+      <usb-device vendor-id="11427" />   (0x2CA3 in decimal)
+
+
+APPROACH B: /dev/input via ADB or Shizuku
+==========================================
+
+This reads the Linux input event stream directly. The user confirmed that
+`adb shell getevent /dev/input/event8` captures all stick/wheel/button data.
+
+The key insight: this works because ADB shell (uid 2000) has the `input`
+group permission. A regular app does NOT. So to use this from an app,
+you need Shizuku (which gives shell-level access).
+
+WITHOUT AN APP (just ADB):
+  adb shell getevent -lt /dev/input/event8
+  This prints human-readable events. You could pipe this to a PC script.
+  This is the simplest possible approach if you just need to read data
+  on a PC that's connected via USB anyway.
+
+FROM AN APP WITH SHIZUKU:
+  1. Install Shizuku app on the RC, start it via `adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh`
+  2. In your app, add Shizuku dependencies:
+       implementation("dev.rikka.shizuku:api:13.1.5")
+       implementation("dev.rikka.shizuku:provider:13.1.5")
+  3. Add to AndroidManifest.xml:
+       <uses-permission android:name="rikka.shizuku.permission.API_V23" />
+       <provider
+           android:name="rikka.shizuku.ShizukuProvider"
+           android:authorities="${applicationId}.shizuku"
+           android:multiprocess="false"
+           android:enabled="true"
+           android:exported="true"
+           android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+  4. Request permission: Shizuku.requestPermission(requestCode)
+  5. Spawn process (newProcess is private in v13, use reflection):
+       Method newProcess = Shizuku.class.getDeclaredMethod("newProcess",
+           String[].class, String[].class, String.class);
+       newProcess.setAccessible(true);
+       Process proc = (Process) newProcess.invoke(null,
+           new String[]{"cat", "/dev/input/event8"}, null, null);
+  6. Read 24-byte structs from proc.getInputStream()
+
+DEVICE PATH DISCOVERY:
+  Parse /proc/bus/input/devices, look for Name="DJI embedded joystick".
+  The H: line gives the eventN number. Usually event8 but may vary.
+
+struct input_event ON ARM64 (24 bytes, little-endian):
+  Bytes 0-7:   tv_sec  (int64)
+  Bytes 8-15:  tv_usec (int64)
+  Bytes 16-17: type    (uint16) — EV_ABS=0x03, EV_KEY=0x01, EV_SYN=0x00
+  Bytes 18-19: code    (uint16) — axis or key code
+  Bytes 20-23: value   (int32)  — axis value or 0/1 for keys
+
+EVENT CODES:
+  EV_ABS (type=3):
+    ABS_X     (0x00) = Left stick horizontal   (range ±32768)
+    ABS_Y     (0x01) = Left stick vertical      (range ±32768)
+    ABS_Z     (0x02) = Left wheel               (range 0-255, center=127)
+    ABS_RX    (0x03) = Right stick horizontal   (range ±32768)
+    ABS_RY    (0x04) = Right stick vertical     (range ±32768)
+    ABS_RZ    (0x05) = Right wheel              (range 0-255, center=127)
+    ABS_HAT0X (0x10) = 5D joystick horizontal   (-1=left, 0=center, 1=right)
+    ABS_HAT0Y (0x11) = 5D joystick vertical     (-1=up, 0=center, 1=down)
+
+  EV_KEY (type=1):
+    KEY_RECORD (167)  = Record button            (value: 1=press, 0=release)
+    BTN_A      (304)  = Shutter full press
+    BTN_B      (305)  = 5D center press
+    (Plus other gamepad BTN_* codes for various buttons)
+
+  EV_SYN (type=0):
+    SYN_REPORT (0) = end of event batch, this is when you emit the state
+
+
+WHICH APPROACH TO CHOOSE?
+==========================
+
+For a new clean app:
+  - If the app runs ON the RC and needs data locally → Approach A (raw USB)
+    No dependencies, no Shizuku install needed. Just UsbManager.
+  - If you just need data on a connected PC → `adb shell getevent` piped
+    through ADB is the absolute simplest (no app needed at all!)
+  - If you want the app to work without USB permission dialogs → Approach B
+    with Shizuku, but requires Shizuku to be installed and running.
+
+For this project (RC → WiFi → PC), Approach A is recommended because:
+  - The app needs to run anyway (for WebSocket)
+  - No extra software to install on the RC
+  - Clean, well-understood packet format
+  - Works even if /dev/input path changes

@@ -1,0 +1,13 @@
+Collecting zeroconf
+  Downloading zeroconf-0.148.0-cp314-cp314-win_amd64.whl.metadata (6.3 kB)
+Collecting ifaddr>=0.1.7 (from zeroconf)
+  Downloading ifaddr-0.2.0-py3-none-any.whl.metadata (4.9 kB)
+Downloading zeroconf-0.148.0-cp314-cp314-win_amd64.whl (1.6 MB)
+   ---------------------------------------- 1.6/1.6 MB 798.9 kB/s  0:00:01
+Downloading ifaddr-0.2.0-py3-none-any.whl (12 kB)
+Installing collected packages: ifaddr, zeroconf
+
+Successfully installed ifaddr-0.2.0 zeroconf-0.148.0
+
+[notice] A new release of pip is available: 25.3 -> 26.0.1
+[notice] To update, run: python.exe -m pip install --upgrade pip

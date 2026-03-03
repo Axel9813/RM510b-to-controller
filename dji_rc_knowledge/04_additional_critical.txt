@@ -1,0 +1,150 @@
+Additional Critical Knowledge for the New App
+===============================================
+
+
+FLUTTER + ANDROID NATIVE BRIDGE
+---------------------------------
+The RC data reading MUST happen in native Android code (Java/Kotlin)
+because the UsbManager API is Android-only. Flutter talks to native
+via platform channels:
+
+  - MethodChannel: for commands (start/stop/status) — request-response
+  - EventChannel: for streaming RC state — continuous data flow
+
+Pattern:
+  Native side (Kotlin):
+    class RcPlugin : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+        // MethodChannel handles start/stop
+        // EventChannel.StreamHandler provides onListen/onCancel
+        // Use Handler(Looper.getMainLooper()).post { sink.success(map) }
+        // to emit events on the main thread
+    }
+
+  Flutter side (Dart):
+    final controlChannel = MethodChannel('com.dji.rc/control');
+    final stateChannel = EventChannel('com.dji.rc/state');
+    await controlChannel.invokeMethod('start');
+    stateChannel.receiveBroadcastStream().listen((event) {
+      final state = RcState.fromMap(event);
+    });
+
+Register in MainActivity:
+    override fun configureFlutterEngine(engine: FlutterEngine) {
+        super.configureFlutterEngine(engine)
+        val plugin = RcPlugin(this)
+        MethodChannel(engine.dartExecutor.binaryMessenger, "com.dji.rc/control")
+            .setMethodCallHandler(plugin)
+        EventChannel(engine.dartExecutor.binaryMessenger, "com.dji.rc/state")
+            .setStreamHandler(plugin)
+    }
+
+
+USB PERMISSION FLOW
+--------------------
+Android requires explicit user permission to access USB devices.
+
+AndroidManifest.xml:
+  <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+  <intent-filter>
+      <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+  </intent-filter>
+  <meta-data
+      android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+      android:resource="@xml/usb_device_filter" />
+
+res/xml/usb_device_filter.xml:
+  <resources>
+      <usb-device vendor-id="11427" />  <!-- 0x2CA3 = DJI -->
+  </resources>
+
+Programmatic permission request:
+  val permissionIntent = PendingIntent.getBroadcast(
+      context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE)
+  usbManager.requestPermission(device, permissionIntent)
+
+  // Receive result via BroadcastReceiver
+
+
+BUILD CONFIGURATION
+--------------------
+build.gradle.kts key settings:
+  - minSdk = 26 (Android 8+, the RC runs Android 10)
+  - ndk.abiFilters: "arm64-v8a" (RC is ARM64; "armeabi-v7a" optional)
+  - Java 17 compatibility
+
+The old project had a LOT of unnecessary dependencies. For the new app
+you only need:
+  - Flutter SDK
+  - web_socket_channel (pubspec.yaml) for WebSocket
+  - No Shizuku (if using raw USB approach)
+  - No DJI SDK (confirmed broken on RC hardware)
+  - No rc-monitor submodule (was a C library with JNI for parsing;
+    you can parse the 18-byte USB packet directly in Java)
+  - No usb_serial (was for Arduino communication)
+
+
+XPAD DRIVER GOTCHA
+--------------------
+When the xpad kernel driver is attached (default state), Android sees the
+DJI joystick as a gamepad. This means:
+  - Activity receives MotionEvent/KeyEvent (but DJI intercepts some)
+  - /dev/input/event8 has data (but app can't read without root/Shizuku)
+
+When you call claimInterface(force=true):
+  - xpad is detached
+  - Android no longer sees the gamepad
+  - No more MotionEvent/KeyEvent from the joystick
+  - /dev/input/event8 stops producing events
+  - But you get raw USB packets with ALL accessible data
+
+This is fine — raw USB gives everything you need. Just be aware that
+while raw USB is active, no other app (including DJI's own) can use
+the joystick.
+
+
+JSON PAYLOAD FORMAT
+--------------------
+The WebSocket message format used successfully:
+
+  {
+    "type": "rc_state",
+    "stickLeftH": 0,        // signed int, ±660 range
+    "stickLeftV": 0,
+    "stickRightH": 0,
+    "stickRightV": 0,
+    "record": false,         // boolean
+    "shutter": false,
+    "fiveDUp": false,
+    "fiveDDown": false,
+    "fiveDLeft": false,
+    "fiveDRight": false,
+    "fiveDCenter": false,
+    "leftWheel": 0,          // signed int, ±660 range
+    "rightWheel": 0
+  }
+
+You can modify this for the Raspberry Pi Pico — add/remove fields as needed.
+The PC server processes JSON, so changes are trivial on both sides.
+
+
+THINGS THAT WERE TRIED AND DIDN'T WORK
+----------------------------------------
+Do NOT waste time on these:
+
+1. DJI V5 SDK — VerifyError at runtime, bytecode issue in the provided JAR.
+   Cannot init SDKManager on the RC. Only designed for phone apps.
+
+2. DJI Protocol Binder IPC — requires dji.permission.PROTOCOL which is a
+   signature-level permission. App must be signed with DJI's platform key.
+
+3. DUSS stream (USB interface 7) — complex DJI-proprietary protocol,
+   never yielded useful button data in testing.
+
+4. Activity event forwarding for sticks — DJI firmware intercepts
+   MotionEvent at InputDispatcher level. Only KeyEvents for some buttons
+   arrive at the Activity.
+
+5. Reading /dev/input directly from app — EACCES, app not in input group.
+   Only works with root or Shizuku.
+
+6. Rooting the RC — no known method for RM510B as of 2025.

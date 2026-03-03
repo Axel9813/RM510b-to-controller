@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- DJI RC embedded joystick: VID 0x2CA3 (11427) -->
+    <usb-device vendor-id="11427" />
+    <!-- Raspberry Pi Pico (MicroPython CDC): VID 0x2E8A (11914) -->
+    <usb-device vendor-id="11914" />
+</resources>

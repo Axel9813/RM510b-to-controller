@@ -1,0 +1,16 @@
+{
+  "pins": {
+    "c1": 21,
+    "c2": 22,
+    "shutter_half": 17,
+    "pause": 4,
+    "rth": 6,
+    "switch_a": 8,
+    "switch_b": 3,
+    "circle": 20,
+    "arrow": 2,
+    "shutter_full": 18
+  },
+  "poll_interval_ms": 5,
+  "debounce_ms": 10
+}

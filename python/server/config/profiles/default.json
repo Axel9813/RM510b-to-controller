@@ -1,0 +1,44 @@
+{
+  "profile_name": "default",
+  "input_mappings": {
+    "pico_pause": {
+      "action": "system",
+      "fn": "media_play_pause"
+    }
+  },
+  "element_registry": {
+    "btn_test1": {
+      "display_name": "Test",
+      "element_type": "button",
+      "on_press": {
+        "action": "none"
+      },
+      "on_release": {
+        "action": "none"
+      }
+    },
+    "but_1772121169513": {
+      "display_name": "Button",
+      "element_type": "button",
+      "on_press": {
+        "action": "none"
+      },
+      "on_release": {
+        "action": "none"
+      }
+    },
+    "sli_1772121175005": {
+      "display_name": "Slider",
+      "element_type": "slider",
+      "on_change": {
+        "action": "none"
+      }
+    },
+    "led_1772121184353": {
+      "display_name": "LED",
+      "element_type": "led",
+      "current_value": false,
+      "trigger": "manual"
+    }
+  }
+}

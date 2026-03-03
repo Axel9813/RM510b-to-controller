@@ -1,0 +1,85 @@
+DJI RM510B (RC Pro / RC Plus) — Device Limitations & Workarounds
+================================================================
+
+HARDWARE
+--------
+- SoC: Rockchip RK3399 (ARM64)
+- OS: Android 10 (API 29)
+- Not rooted, bootloader locked, no known root method
+- Has WiFi (2.4/5GHz), USB-C, internal USB joystick device
+- Front panel round element is an ambient light sensor, NOT a camera.
+  Confirmed by: `adb shell pm list features | grep camera` returns nothing.
+
+USB TOPOLOGY
+------------
+The RC exposes multiple internal USB devices. The one we care about:
+  - DJI Virtual Joystick: VID=0x2CA3 (11427), PID=0x1501 (5377)
+  - Presents as an XInput-like gamepad
+  - Linux xpad kernel driver grabs it by default
+  - Located at /dev/input/event8 (may vary)
+  - Also visible via /proc/bus/input/devices as "DJI embedded joystick"
+
+/dev/input ACCESS RESTRICTION
+------------------------------
+The joystick at /dev/input/event8 belongs to group `input` (gid 1004).
+- Regular Android apps (uid 10xxx) do NOT have `input` group → EACCES
+- ADB shell (uid 2000) IS in the `input` group → can read freely
+- This is why `adb shell getevent /dev/input/event8` works perfectly
+  but an Android app cannot read it directly
+
+WORKAROUND: There are two approaches that work:
+
+  1. RAW USB (preferred, no special tools needed):
+     - Use Android UsbManager API to open VID:2CA3/PID:1501 directly
+     - claimInterface(intf, force=true) detaches the xpad kernel driver
+     - Then read raw HID interrupt IN packets (see 02_reading_rc_data.txt)
+     - Requires one-time USB permission grant via Android system dialog
+
+  2. SHIZUKU (alternative, requires Shizuku app installed):
+     - Shizuku provides shell-level access (uid 2000, in `input` group)
+     - Can spawn `cat /dev/input/event8` via Shizuku.newProcess()
+     - Reads 24-byte struct input_event from stdout
+     - Note: Shizuku.newProcess() is private in v13, needs reflection
+
+DJI FIRMWARE BUTTON INTERCEPTION
+---------------------------------
+6 buttons are intercepted by DJI's firmware BEFORE they reach /dev/input
+or USB HID. They are completely invisible to all standard Android APIs:
+  - C1 (Custom 1)
+  - C2 (Custom 2)
+  - Pause / Stop
+  - Go Home / RTH
+  - Flight Mode switch (3-position: Sport/Normal/Tripod)
+  - Shutter half-press (1st stage)
+
+These buttons CANNOT be captured by any app running on the RC:
+  - Not in /dev/input events
+  - Not in raw USB HID packets
+  - Not via Android InputDevice/MotionEvent/KeyEvent
+  - DJI V5 SDK fails with VerifyError (bytecode verification)
+    when packaged into an APK (the SDK was designed for phone apps
+    connected to RCs, not for apps running ON the RC itself)
+
+The remaining controls that ARE accessible cover the primary needs:
+  - 4 stick axes, 2 wheel axes, 5D joystick (5 directions),
+    Record button, Shutter full-press
+
+MOTION EVENT INTERCEPTION
+--------------------------
+DJI's framework intercepts MotionEvent (stick/wheel) at the InputDispatcher
+level. Activity.dispatchGenericMotionEvent() receives stick events ONLY when
+the xpad kernel driver is active. If you detach xpad (via claimInterface
+force=true for raw USB), motion events stop — but that's fine because
+raw USB gives you the same data directly.
+
+KeyEvents for buttons DO arrive at the Activity, but only for buttons
+that Android's input framework recognizes (record, some gamepad buttons).
+Stick movement never arrives as KeyEvent.
+
+NETWORK
+-------
+- WiFi works normally, can connect to any network
+- Windows Firewall blocks incoming connections by default
+  → Must add firewall rules for WebSocket (TCP) and discovery (UDP)
+  → Or use ADB reverse port forwarding through USB cable
+- PC can ping remote, but remote cannot ping PC without firewall rules

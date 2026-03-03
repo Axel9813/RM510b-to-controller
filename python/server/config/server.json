@@ -1,0 +1,7 @@
+{
+  "port": 8080,
+  "discovery_port": 8766,
+  "tcp_beacon_port": 8767,
+  "vjoy_device_id": 1,
+  "active_profile": "default"
+}

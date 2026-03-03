@@ -1,0 +1,269 @@
+PHASE 1 — FOUNDATION — IMPLEMENTATION SUMMARY
+================================================
+
+Completed: 2026-02-25
+
+WHAT WAS BUILT
+--------------
+
+1. Android/Kotlin USB HID Reader
+   - Package: com.dji.rc_to_controller
+   - RcState.kt: data class, parses 18-byte HID packets
+   - RcUsbReader.kt: finds device VID:0x2CA3 PID:0x1501, claims interface
+     with force=true (detaches xpad driver), reads on background thread
+   - RcPlugin.kt: MethodChannel + EventChannel handler, USB permission flow
+   - MainActivity.kt: registers both platform channels
+
+2. Dart Data Models (lib/models/)
+   - RcState: all stick/wheel/button fields + picoBitmask, toJson()/fromMap()
+   - PicoState: bitmask decoder with named getters (stub, always 0)
+   - InterfaceElement: sealed class -> ButtonElement, SliderElement, LedElement
+   - AppLayout: list of elements, JSON serialization, add/remove/update
+
+3. Dart Services (lib/services/)
+   - RcStateService: EventChannel consumer, 50 Hz throttle via 20ms min interval
+   - PicoService: stub, returns bitmask=0
+   - DiscoveryService: UDP broadcast scanner
+   - WebSocketService: WS client with 50 Hz send loop and 3-phase reconnect
+   - LayoutStorageService: SharedPreferences persistence for AppLayout
+
+4. UI (lib/screens/)
+   - main.dart: MultiProvider with all 4 services
+   - app.dart: dark theme, Material 3
+   - main_screen.dart: tab switching + RC->WebSocket data bridge
+   - settings_tab.dart: status rows, server discovery list, connect/disconnect
+   - interface_tab.dart: empty canvas + settings FAB (top-right)
+
+
+FILE STRUCTURE
+--------------
+
+lib/
+├── main.dart
+├── app.dart
+├── models/
+│   ├── rc_state.dart
+│   ├── pico_state.dart
+│   ├── interface_element.dart
+│   └── app_layout.dart
+├── services/
+│   ├── rc_state_service.dart
+│   ├── pico_service.dart
+│   ├── discovery_service.dart
+│   ├── websocket_service.dart
+│   └── layout_storage_service.dart
+├── screens/
+│   ├── main_screen.dart
+│   ├── settings_tab.dart
+│   └── interface_tab.dart
+└── widgets/            (empty, for Phase 2)
+
+android/app/src/main/kotlin/com/dji/rc_to_controller/
+├── MainActivity.kt
+├── RcPlugin.kt
+├── RcUsbReader.kt
+└── RcState.kt
+
+android/app/src/main/res/xml/
+└── usb_device_filter.xml
+
+
+PLATFORM CHANNELS
+-----------------
+
+MethodChannel: 'com.dji.rc/control'
+  start()  -> bool   Opens USB, starts read thread
+  stop()   -> bool   Stops thread, releases USB
+  status() -> Map    {connected: bool, deviceFound: bool, error: String?}
+
+EventChannel: 'com.dji.rc/state'
+  Emits Map<String, dynamic> with RcState fields at ~100 Hz from native,
+  throttled to 50 Hz in Dart (20ms minimum interval).
+
+
+DATA FLOW
+---------
+
+RC HID device (internal USB)
+  -> Kotlin RcUsbReader (background thread, bulkTransfer)
+  -> RcPlugin (posts to main thread via Handler)
+  -> EventChannel
+  -> RcStateService (Dart, ChangeNotifier)
+  -> MainScreen listener merges picoBitmask
+  -> WebSocketService.sendState() at 50 Hz
+  -> PC Python server via WebSocket
+
+
+WEBSOCKET PROTOCOL (RC -> Server)
+----------------------------------
+
+Message type: "rc_state"
+{
+  "type": "rc_state",
+  "seq": 1234,
+  "stickLeftH": 0,        // signed int, center=0, range ~-660..+660
+  "stickLeftV": 0,
+  "stickRightH": 0,
+  "stickRightV": 0,
+  "leftWheel": 0,
+  "rightWheel": 0,
+  "record": false,         // bool
+  "shutter": false,        // bool (full press only)
+  "fiveDUp": false,
+  "fiveDDown": false,
+  "fiveDLeft": false,
+  "fiveDRight": false,
+  "fiveDCenter": false,
+  "picoBitmask": 0         // uint16, 0 while Pico stub is active
+}
+
+WEBSOCKET PROTOCOL (Server -> RC)
+----------------------------------
+
+Message type: "element_update" (single element state change)
+{
+  "type": "element_update",
+  "id": "my_led_01",
+  "value": true
+}
+
+Message type: "elements_full_state" (sent on new connection)
+{
+  "type": "elements_full_state",
+  "states": {
+    "my_led_01": true,
+    "my_led_02": false
+  }
+}
+
+WEBSOCKET PROTOCOL (RC -> Server, UI element events)
+-----------------------------------------------------
+
+Button press/release:
+{ "type": "element_event", "id": "btn_xxx", "event": "press" }
+{ "type": "element_event", "id": "btn_xxx", "event": "release" }
+
+Slider change:
+{ "type": "element_event", "id": "sld_xxx", "event": "change", "value": 0.73 }
+
+
+UDP DISCOVERY PROTOCOL
+----------------------
+
+Port: 8766
+Magic prefix: "DJI_RC_DISCOVER|"
+
+RC broadcasts to 255.255.255.255:8766:
+  DJI_RC_DISCOVER|{"type":"discover"}
+
+Server responds unicast:
+  DJI_RC_DISCOVER|{"type":"dji_rc_server","name":"MyPC","port":8765,"ips":["192.168.1.10"]}
+
+
+RECONNECTION POLICY
+--------------------
+
+Phase 1 (0-60s):    retry every 2s
+Phase 2 (60-600s):  delay increases by 5s per failure, capped at 60s
+Phase 3 (>600s):    give up, show "Tap Retry" banner
+
+
+HID PACKET FORMAT (18 bytes)
+-----------------------------
+
+Byte 0:     Report ID (always 0x02)
+Byte 1:     Constant (always 0x0E)
+Bytes 2-3:  Sequence counter (uint16 LE)
+Bytes 4-5:  Right stick H (uint16 LE, center=1024)
+Bytes 6-7:  Right stick V (uint16 LE, center=1024)
+Bytes 8-9:  Left stick V (uint16 LE, center=1024)
+Bytes 10-11: Left stick H (uint16 LE, center=1024)
+Bytes 12-13: Left wheel (uint16 LE, center=1024)
+Bytes 14-15: Right wheel (uint16 LE, center=1024)
+Bytes 16-17: Button flags
+  Byte 16 bit 2 (0x04) = Record
+  Byte 16 bit 3 (0x08) = Shutter full press
+  Byte 17 bit 0 (0x01) = 5D Up
+  Byte 17 bit 1 (0x02) = 5D Down
+  Byte 17 bit 2 (0x04) = 5D Left
+  Byte 17 bit 3 (0x08) = 5D Right
+  Byte 17 bit 4 (0x10) = 5D Center
+
+Signed axis = raw_uint16 - 1024 -> range approx +/-660
+
+
+PICO BITMASK (16-bit, planned)
+-------------------------------
+
+Bit 0: C1
+Bit 1: C2
+Bit 2: Shutter half-press
+Bit 3: Pause/Stop
+Bit 4: Return-to-Home
+Bit 5: 3-pos switch state A (pin 1 shorted -> position 1)
+Bit 6: 3-pos switch state B (pin 2 shorted -> position 3)
+Bit 7: Circle button
+Bit 8: Arrow button
+Bits 9-15: reserved
+
+Switch decoding: 00=pos2, 01=pos1, 10=pos3
+
+
+INTERFACE ELEMENT GRID
+----------------------
+
+Grid cell size: min(screenWidth, screenHeight) / 8  (starting value ~56dp)
+Default element sizes (in grid cells):
+  Button: 3w x 2h
+  Slider: 6w x 2h
+  LED:    2w x 2h
+
+Element IDs: generated as "btn_<timestamp>", "sld_<timestamp>", "led_<timestamp>"
+
+
+FIRMWARE-INTERCEPTED BUTTONS (NOT available via USB HID)
+---------------------------------------------------------
+
+These 6 buttons are consumed by DJI firmware before reaching any app:
+  C1, C2, Pause, Return-to-Home, Flight Mode switch, Shutter half-press
+-> That is why Raspberry Pi Pico is needed to read them via hardware wiring.
+
+
+BUILD CONFIG
+------------
+
+minSdk: 26
+NDK ABI: arm64-v8a only
+Java/Kotlin target: 17
+Namespace/applicationId: com.dji.rc_to_controller
+WebSocket server default port: 8765
+Discovery UDP port: 8766
+
+
+DEPENDENCIES (pubspec.yaml)
+----------------------------
+
+web_socket_channel: ^3.0.1
+shared_preferences: ^2.3.0
+provider: ^6.1.2
+
+
+
+Build the APK and install via ADB:
+
+
+# Build release APK
+cd c:/projects/rc_to_controller/flutter
+flutter build apk --release --target-platform android-arm64
+
+# Install on connected device
+adb install build/app/outputs/flutter-apk/app-release.apk
+If the app is already installed and you're updating:
+
+
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+If you want a debug build instead (faster build, includes dev tools):
+
+
+flutter build apk --debug --target-platform android-arm64
+adb install -r build/app/outputs/flutter-apk/app-debug.apk

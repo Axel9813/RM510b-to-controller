@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DJI RC Controller Server</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- Header -->
+    <header class="app-header">
+      <span class="app-title">DJI RC Controller</span>
+      <div class="header-status">
+        <span class="status-pill" id="rc-status-pill">
+          <span class="status-dot" id="rc-status-dot"></span>
+          <span id="rc-status-label">RC: offline</span>
+        </span>
+        <span class="status-pill" id="vjoy-status-pill">
+          <span class="status-dot" id="vjoy-status-dot"></span>
+          <span id="vjoy-status-label">vJoy: —</span>
+        </span>
+        <span class="profile-badge" id="profile-badge">profile: default</span>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="monitor">&#9654; Live Monitor</button>
+      <button class="tab-btn" data-tab="config">&#9881; Configuration</button>
+    </nav>
+
+    <!-- Tab: Monitor -->
+    <div class="tab-panel active" id="tab-monitor">
+      <div id="rc-visualizer-container">
+        <!-- SVG built by rc_visualizer.js -->
+      </div>
+      <div class="pico-notice" id="pico-notice">
+        Pico inputs (C1, C2, A, Pause, Shutter&#189;, Switch, Circle, Arrow) shown dimmed — awaiting Pico connection.
+      </div>
+    </div>
+
+    <!-- Tab: Configuration -->
+    <div class="tab-panel" id="tab-config">
+
+      <!-- Profile Management -->
+      <section class="config-section" id="section-profiles">
+        <div class="section-header" data-toggle="profiles-body">
+          <span>&#x25B6; Profile Management</span>
+        </div>
+        <div class="section-body" id="profiles-body">
+          <div class="profile-controls">
+            <label>Active profile:</label>
+            <select id="profile-select"></select>
+            <button class="btn btn-primary" id="btn-activate-profile">Switch</button>
+            <button class="btn btn-secondary" id="btn-new-profile">+ New</button>
+            <button class="btn btn-secondary" id="btn-export-profile">&#11015; Export</button>
+            <label class="btn btn-secondary" for="import-file-input">&#11014; Import</label>
+            <input type="file" id="import-file-input" accept=".json" style="display:none" />
+            <button class="btn btn-danger" id="btn-delete-profile">Delete</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Input Mappings -->
+      <section class="config-section" id="section-mappings">
+        <div class="section-header" data-toggle="mappings-body">
+          <span>&#x25B6; Input → Action Mappings</span>
+          <button class="btn btn-primary btn-sm" id="btn-save-mappings">Save All</button>
+        </div>
+        <div class="section-body" id="mappings-body">
+          <p class="hint">HID inputs (available now) shown normally. Pico inputs shown dimmed — will activate when Pico connects.</p>
+          <table class="mapping-table" id="mapping-table">
+            <thead>
+              <tr>
+                <th>Input</th>
+                <th>Source</th>
+                <th>Type</th>
+                <th>Action</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="mapping-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Elements & Outputs -->
+      <section class="config-section" id="section-elements">
+        <div class="section-header" data-toggle="elements-body">
+          <span>&#x25B6; Screen Elements &amp; Outputs</span>
+        </div>
+        <div class="section-body" id="elements-body">
+          <p class="hint">These elements are registered automatically when the RC app connects. Configure what each one does here.</p>
+          <div id="elements-container">
+            <p class="empty-hint" id="elements-empty">No elements registered yet. Connect the RC app and configure your screen elements.</p>
+            <table class="mapping-table" id="elements-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Action / State</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="elements-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /tab-config -->
+
+  </div><!-- /app-shell -->
+
+  <!-- Modal overlay -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal-box">
+      <div id="modal-title-bar">
+        <span id="modal-title">Edit</span>
+        <button id="modal-close" class="btn-icon">&#x2715;</button>
+      </div>
+      <div id="modal-body"></div>
+      <div id="modal-footer">
+        <button class="btn btn-primary" id="modal-ok">Save</button>
+        <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/rc_visualizer.js"></script>
+  <script src="/static/config_editor.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

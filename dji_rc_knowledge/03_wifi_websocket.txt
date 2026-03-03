@@ -1,0 +1,192 @@
+WiFi WebSocket Connection — Implementation Guide
+==================================================
+
+ARCHITECTURE
+------------
+  DJI RC (Android app)  ──WebSocket──>  PC (Python server)
+       client                              server
+
+The RC app connects as a WebSocket CLIENT to a server running on the PC.
+The server listens for connections and receives RC state as JSON at a
+configurable rate (10/20/50 Hz).
+
+Communication is two-way: the server can send messages back to the RC
+(for future use: displaying PC data on the RC screen).
+
+
+FLUTTER SIDE (WebSocket Client)
+================================
+
+DEPENDENCY:
+  pubspec.yaml:
+    dependencies:
+      web_socket_channel: ^3.0.1
+
+  This package provides a cross-platform WebSocket client. It uses
+  dart:io WebSocket under the hood on Android.
+
+PERMISSIONS:
+  AndroidManifest.xml:
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+CONNECTING:
+  import 'package:web_socket_channel/web_socket_channel.dart';
+
+  final wsUrl = Uri.parse('ws://$host:$port');
+  final channel = WebSocketChannel.connect(wsUrl);
+  await channel.ready;  // throws on failure
+
+  // Listen for messages from server
+  channel.stream.listen(
+    (message) { /* handle server message */ },
+    onError: (error) { /* connection error */ },
+    onDone: () { /* connection closed */ },
+  );
+
+  // Send data
+  channel.sink.add(jsonEncode(payload));
+
+  // Close
+  await channel.sink.close();
+
+SENDING RC STATE:
+  Use a periodic Timer to send state at fixed rate:
+
+  Timer.periodic(Duration(milliseconds: 50), (_) {
+    if (channel == null) return;
+    channel.sink.add(jsonEncode({
+      'type': 'rc_state',
+      'stickLeftH': state.stickLeftH,
+      'stickLeftV': state.stickLeftV,
+      'stickRightH': state.stickRightH,
+      'stickRightV': state.stickRightV,
+      'record': state.record,
+      'shutter': state.shutter,
+      'fiveDUp': state.fiveDUp,
+      // ... etc
+    }));
+  });
+
+AUTO-RECONNECT:
+  On disconnect, schedule a reconnect after a delay:
+
+  Timer(Duration(seconds: 3), () async {
+    final result = await doConnect();
+  });
+
+
+PC SIDE (Python WebSocket Server)
+===================================
+
+DEPENDENCY:
+  pip install websockets
+
+MINIMAL SERVER:
+  import asyncio, json, websockets
+
+  async def handler(websocket):
+      async for message in websocket:
+          data = json.loads(message)
+          # Process RC state data...
+
+  async def main():
+      async with websockets.serve(handler, "0.0.0.0", 8765):
+          await asyncio.Future()  # run forever
+
+  asyncio.run(main())
+
+The server binds to 0.0.0.0 so it accepts connections from any interface.
+
+
+UDP AUTO-DISCOVERY (Pairing Without Manual IP Entry)
+=====================================================
+
+Problem: User doesn't know the PC's IP address, and it changes with networks.
+
+Solution: UDP broadcast discovery protocol.
+
+PROTOCOL:
+  - Magic prefix: "DJI_RC_DISCOVER" (ASCII)
+  - Separator: "|"
+  - Payload: JSON
+  - Discovery port: 8766 (UDP)
+
+FLOW:
+  1. PC server binds UDP socket to 0.0.0.0:8766
+  2. RC app binds UDP socket to random port (port 0)
+  3. RC app sends broadcast to 255.255.255.255:8766:
+       DJI_RC_DISCOVER|{"type":"discover"}
+  4. PC server receives request, sends unicast response to sender:
+       DJI_RC_DISCOVER|{"type":"dji_rc_server","name":"MyPC","port":8765,"ips":["192.168.0.227"]}
+  5. RC app receives response, displays server in UI
+  6. User taps server entry → WebSocket connects to that IP:port
+
+PC SIDE (asyncio DatagramProtocol):
+  class DiscoveryProtocol(asyncio.DatagramProtocol):
+      def datagram_received(self, data, addr):
+          if data.startswith(b"DJI_RC_DISCOVER"):
+              payload = data[len(b"DJI_RC_DISCOVER")+1:]
+              request = json.loads(payload)
+              if request.get("type") == "discover":
+                  response = b"DJI_RC_DISCOVER|" + json.dumps({
+                      "type": "dji_rc_server",
+                      "name": platform.node(),
+                      "port": ws_port,
+                      "ips": get_local_ips(),
+                  }).encode()
+                  self.transport.sendto(response, addr)
+
+  # Register with asyncio:
+  transport, protocol = await loop.create_datagram_endpoint(
+      lambda: DiscoveryProtocol(port, name),
+      local_addr=("0.0.0.0", 8766),
+      allow_broadcast=True,
+  )
+
+FLUTTER SIDE (dart:io RawDatagramSocket):
+  // Bind to random port
+  final socket = await RawDatagramSocket.bind(
+    InternetAddress.anyIPv4, 0,
+    reuseAddress: true,
+  );
+  socket.broadcastEnabled = true;
+
+  // Listen for responses
+  socket.listen((event) {
+    if (event == RawSocketEvent.read) {
+      final datagram = socket.receive();
+      // Parse DJI_RC_DISCOVER|{...} response
+    }
+  });
+
+  // Send discovery request
+  socket.send(
+    utf8.encode('DJI_RC_DISCOVER|{"type":"discover"}'),
+    InternetAddress('255.255.255.255'),
+    8766,
+  );
+
+IMPORTANT: Do NOT bind the app to port 8766 — that conflicts with the
+server. Use port 0 (random) and rely on the server responding to the
+sender's address.
+
+
+NETWORK REQUIREMENTS
+=====================
+
+For WiFi-only operation (no USB cable):
+  Windows Firewall rules needed:
+    netsh advfirewall firewall add rule name="DJI RC Discovery" dir=in action=allow protocol=UDP localport=8766
+    netsh advfirewall firewall add rule name="DJI RC WebSocket" dir=in action=allow protocol=TCP localport=8765
+
+For USB + WiFi (ADB reverse tunnel):
+  adb reverse tcp:8765 tcp:8765
+  Then app connects to 127.0.0.1:8765, which tunnels through USB to PC.
+  Note: UDP discovery does NOT work over ADB reverse (TCP only).
+  With ADB reverse, manual IP 127.0.0.1 must be used.
+
+RC and PC must be on the same WiFi network / subnet for broadcast
+discovery to work. Some routers have "AP isolation" that blocks
+client-to-client traffic — this would prevent discovery AND WebSocket.

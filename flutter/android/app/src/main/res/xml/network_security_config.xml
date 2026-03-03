@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Configuration — DJI RC Controller
+
+  Android 9+ (API 28+) blocks all cleartext (HTTP/WS) traffic by default.
+  Our server uses plain ws:// on the LAN — TLS is impractical without a
+  certificate, so we explicitly permit cleartext for all destinations.
+
+  This app never communicates with the public internet for its core function;
+  all traffic goes to the PC server on the local Wi-Fi network.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
