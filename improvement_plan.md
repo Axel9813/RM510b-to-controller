@@ -36,18 +36,18 @@ Fixes:
    - Updated `rc_visualizer.js` right trigger display to use only Pico `shutter_half` (bit 2) and `shutter_full` (bit 9), removed HID shutter OR-merge.
    - Shutter is now exclusively handled by the Pico via `pico_shutter_half` and `pico_shutter_full` GPIO inputs.
 
-3. Outputs of elements placed on customizable interface not being displayed correctly on frontend monitor.
+3. ~~DONE~~ Outputs of elements placed on customizable interface not being displayed correctly on frontend monitor.
 
-   **Root cause analysis:**
-   - `output_manager.py` `toggle()`/`set()` sends state changes to the RC via `_schedule_push_to_rc()`, but does NOT broadcast to the browser monitor WebSocket clients.
-   - The frontend's `setScreenElements()` only updates on `registry_update` messages, which only fire during hello handshakes (rare).
-   - After toggling a LED on the PC frontend, the change is applied server-side but the browser UI doesn't reflect it until page refresh.
-
-   **Plan of approach:**
-   - [ ] After any element state change in `output_manager.py`, broadcast an `element_state_update` message to all connected browser WebSocket clients (via `server.py`'s broadcast mechanism).
-   - [ ] In the frontend JS (`app.js` or `rc_visualizer.js`), listen for `element_state_update` and call `setScreenElements()` to re-render affected elements.
-   - [ ] Alternatively, send individual `element_update` messages (not full registry) for efficiency.
-   - [ ] Verify that the RC → PC direction also triggers UI updates when elements change from the RC side.
+   **What was done:**
+   - Added `_notify_monitors_state()` helper in `output_manager.py` that broadcasts `element_state_update` messages to all browser monitor WebSocket clients.
+   - `toggle()` and `set_value()` now call `_notify_monitors_state()` after changing LED state — browser UI updates immediately.
+   - `handle_element_event()` now broadcasts button press/release and slider value changes to browser clients — RC-side interactions are reflected live.
+   - Added `element_state_update` message handler in `app.js` that routes to `ConfigEditor.updateElementState()`.
+   - Added `updateElementState()` in `config_editor.js` — updates local element cache and re-renders both the config table and the SVG visualizer.
+   - Updated SVG `setScreenElements()` in `rc_visualizer.js` — buttons highlight on press (yellow dot + brighter border), sliders show a position bar, LEDs show green/grey dot. Each type visually distinct.
+   - **Element positioning:** `merge_hello()` now stores `grid_x/y/w/h` from Flutter hello messages. Grid data is always updated on reconnect (user may have moved elements). The SVG visualizer positions elements at their actual grid coordinates scaled to the screen area.
+   - **Dynamic grid dimensions:** Flutter hello message now includes `gridCols`/`gridRows` (computed from `MediaQuery` screen size and cellSize formula). Python stores and exposes them via REST `/api/status` and WebSocket `initial_state`/`registry_update`. Frontend uses these to scale the SVG screen grid accurately. Fallback to 16×9 if RC hasn't connected yet.
+   - Added `_syncScreenElements()` call to `renderAll()` so the REST load path (initial page load, profile switches) also syncs the SVG screen — previously only the WebSocket path did.
 
 4. In Flutter app interface Pico status indicator not changing (leftover from time when it was not fully implemented).
 
@@ -59,17 +59,12 @@ Fixes:
    - [ ] Change `connected: false` to `connected: picoService.status == 'connected'` in `settings_tab.dart`.
    - [ ] Verify that `PicoService` is properly registered as a `ChangeNotifier` and that the settings tab rebuilds when status changes.
 
-5. On customizable interface on PC frontend displayed nonexistent "Test" button.
+5. ~~DONE~~ On customizable interface on PC frontend displayed nonexistent "Test" button.
 
-   **Root cause analysis:**
-   - No "Test" button found in the frontend source code (`index.html`, `config_editor.js`, `app.js`, `rc_visualizer.js`).
-   - Likely a leftover entry in the element registry stored in the server profile or persisted in the Flutter app's SharedPreferences.
-
-   **Plan of approach:**
-   - [ ] Check the active profile's `element_registry` in `config/profiles/default.json` for a "Test" entry.
-   - [ ] Check the Flutter app's SharedPreferences `interface_layout` key for stale elements.
-   - [ ] Add validation in `output_manager.py` `merge_hello()` to skip unknown/orphaned elements.
-   - [ ] Add a "delete element" button in the PC frontend config editor to remove stale entries.
+   **What was done:**
+   - Fixed `merge_hello()` in `output_manager.py` to prune stale elements: any registry entry whose ID is NOT in the incoming Flutter hello elements list is deleted.
+   - On each RC connection, the Flutter app sends its current element list via hello. Elements deleted on the RC are now automatically removed from the server registry and the PC frontend.
+   - No more orphaned entries accumulating — the registry stays in sync with the Flutter app's actual interface layout.
 
 6. system_actions pycaw not available ('AudioDevice' object has no attribute 'Activate') — volume_set will not work.
 

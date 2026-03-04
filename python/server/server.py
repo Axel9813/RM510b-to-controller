@@ -191,7 +191,9 @@ def handle_rc_message(msg: dict[str, Any]) -> None:
 
     elif msg_type == "hello":
         elements = msg.get("elements", [])
-        changed = output_mgr.merge_hello(elements)
+        grid_cols = msg.get("gridCols", 0)
+        grid_rows = msg.get("gridRows", 0)
+        changed = output_mgr.merge_hello(elements, grid_cols=grid_cols, grid_rows=grid_rows)
         # Respond with full LED state
         if _rc_conn is not None:
             asyncio.ensure_future(_rc_conn.send({
@@ -199,9 +201,12 @@ def handle_rc_message(msg: dict[str, Any]) -> None:
                 "states": output_mgr.get_full_state(),
             }))
         if changed:
+            gc, gr = output_mgr.get_grid_size()
             asyncio.ensure_future(_broadcast_to_monitors(json.dumps({
                 "type": "registry_update",
                 "registry": output_mgr.get_registry(),
+                "grid_cols": gc,
+                "grid_rows": gr,
             })))
         log.info("hello processed: %d elements registered.", len(elements))
 
@@ -219,6 +224,7 @@ async def ws_monitor(websocket: WebSocket) -> None:
     _monitor_clients.add(websocket)
 
     # Send initial state immediately
+    grid_cols, grid_rows = output_mgr.get_grid_size()
     await websocket.send_text(json.dumps({
         "type": "initial_state",
         "rc_connected": _rc_connected,
@@ -226,6 +232,8 @@ async def ws_monitor(websocket: WebSocket) -> None:
         "vjoy_error": vjoy.error,
         "rc_state": _last_rc_state,
         "registry": output_mgr.get_registry(),
+        "grid_cols": grid_cols,
+        "grid_rows": grid_rows,
         "active_profile": cfg.active_profile_name(),
         "profiles": cfg.list_profiles(),
     }))
@@ -260,6 +268,7 @@ async def serve_index() -> FileResponse:
 
 @app.get("/api/status")
 async def api_status() -> JSONResponse:
+    grid_cols, grid_rows = output_mgr.get_grid_size()
     return JSONResponse({
         "rc_connected": _rc_connected,
         "last_seq": _last_seq,
@@ -269,6 +278,8 @@ async def api_status() -> JSONResponse:
         "profiles": cfg.list_profiles(),
         "mappings": cfg.input_mappings(),
         "elements": output_mgr.get_registry() if output_mgr else {},
+        "grid_cols": grid_cols,
+        "grid_rows": grid_rows,
     })
 
 

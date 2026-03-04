@@ -86,13 +86,22 @@ class _InterfaceTabState extends State<InterfaceTab> {
     }
   }
 
+  void _syncHello(AppLayout layout) {
+    final mq = MediaQuery.of(context);
+    final cs = (mq.size.shortestSide / 8).clamp(40.0, 80.0);
+    final cols = (mq.size.width / cs).floor();
+    final rows = (mq.size.height / cs).floor();
+    context.read<WebSocketService>().setHelloElements(
+          layout.elements.map((e) => e.toJson()).toList(),
+          gridCols: cols,
+          gridRows: rows,
+        );
+  }
+
   void _onLayoutChanged(AppLayout updated) {
     setState(() => _layout = updated);
     _storage.save(updated);
-    // Keep WebSocket hello in sync
-    context.read<WebSocketService>().setHelloElements(
-          updated.elements.map((e) => e.toJson()).toList(),
-        );
+    _syncHello(updated);
   }
 
   void _onElementPress(String id) {

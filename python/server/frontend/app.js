@@ -193,7 +193,7 @@
         setRCStatus(msg.rc_connected ?? false);
         setVJoyStatus(msg.vjoy_active ?? false, msg.vjoy_error);
         if (msg.active_profile) setProfile(msg.active_profile);
-        if (msg.registry) ConfigEditor.loadRegistry(msg.registry);
+        if (msg.registry) ConfigEditor.loadRegistry(msg.registry, msg.grid_cols, msg.grid_rows);
         if (msg.rc_state) {
           _lastRcState = msg.rc_state;
           // Pico connected = picoBitmask is present and non-zero
@@ -216,7 +216,12 @@
 
       case "registry_update":
         // When new Flutter elements arrive via hello
-        if (msg.registry) ConfigEditor.loadRegistry(msg.registry);
+        if (msg.registry) ConfigEditor.loadRegistry(msg.registry, msg.grid_cols, msg.grid_rows);
+        break;
+
+      case "element_state_update":
+        // Single element state change (LED toggle, button press, slider move)
+        ConfigEditor.updateElementState(msg.id, msg.value);
         break;
 
       case "profile_changed":

@@ -41,6 +41,8 @@ class WebSocketService extends ChangeNotifier {
 
   // Elements sent in the hello handshake when a client connects
   List<Map<String, dynamic>>? _helloElements;
+  int _helloGridCols = 0;
+  int _helloGridRows = 0;
 
   // ── Getters ──────────────────────────────────────────────────────────────
 
@@ -113,8 +115,12 @@ class WebSocketService extends ChangeNotifier {
   }
 
   /// Register the current interface layout for the hello handshake.
-  void setHelloElements(List<Map<String, dynamic>> elements) {
+  /// [gridCols] and [gridRows] describe the visible grid on this device.
+  void setHelloElements(List<Map<String, dynamic>> elements,
+      {int gridCols = 0, int gridRows = 0}) {
     _helloElements = elements;
+    _helloGridCols = gridCols;
+    _helloGridRows = gridRows;
     // If a client is already connected, send hello now
     if (_status == ConnectionStatus.connected) {
       _sendHello();
@@ -211,7 +217,12 @@ class WebSocketService extends ChangeNotifier {
   void _sendHello() {
     final elements = _helloElements;
     if (elements == null) return;
-    _sendRaw({'type': 'hello', 'elements': elements});
+    _sendRaw({
+      'type': 'hello',
+      'elements': elements,
+      'gridCols': _helloGridCols,
+      'gridRows': _helloGridRows,
+    });
   }
 
   bool _sendRaw(Map<String, dynamic> data) {

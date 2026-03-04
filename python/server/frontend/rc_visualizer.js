@@ -546,49 +546,75 @@ const RCV = (() => {
     );
   }
 
-  function setScreenElements(elements) {
+  function setScreenElements(elements, gridCols, gridRows) {
     const g = refs["screen_chips"];
     if (!g) return;
     while (g.firstChild) g.removeChild(g.firstChild);
+    if (!elements.length) return;
+
     const { x, y, w, h } = SCREEN;
-    const cols = 4,
-      chipW = 130,
-      chipH = 22,
-      gapX = 10,
-      gapY = 6;
-    const startX = x + 14,
-      startY = y + 22;
-    elements.slice(0, 16).forEach((elem, i) => {
-      const col = i % cols,
-        row = Math.floor(i / cols);
-      const ex = startX + col * (chipW + gapX);
-      const ey = startY + row * (chipH + gapY);
-      const chip = el("rect", {
-        x: ex,
-        y: ey,
-        width: chipW,
-        height: chipH,
-        rx: 5,
-        fill: "#131330",
-        stroke: "#252550",
-      });
-      g.appendChild(chip);
-      const t = text(elem.name || elem.id, {
-        x: ex + 8,
-        y: ey + 15,
-        fill: "#5050a0",
-        "font-size": 10,
-        "font-family": "monospace",
-      });
-      g.appendChild(t);
-      const ledC = el("circle", {
-        cx: ex + chipW - 10,
-        cy: ey + chipH / 2,
-        r: 4,
-        fill: elem.state ? "#3dd68c" : "#222240",
-        stroke: "#333365",
-      });
-      g.appendChild(ledC);
+    const pad = 4;
+
+    // Use grid dimensions from RC, fallback to reasonable defaults
+    const cols = gridCols || 16;
+    const rows = gridRows || 9;
+    const cellW = (w - pad * 2) / cols;
+    const cellH = (h - pad * 2) / rows;
+
+    elements.forEach((elem) => {
+      const gx = elem.gridX || 0, gy = elem.gridY || 0;
+      const gw = elem.gridW || 3, gh = elem.gridH || 2;
+      const ex = x + pad + gx * cellW;
+      const ey = y + pad + gy * cellH;
+      const ew = gw * cellW - 2;
+      const eh = gh * cellH - 2;
+
+      const active = !!elem.state;
+      const etype = elem.type || "button";
+
+      // Chip background — highlight on active button press
+      const chipFill = (etype === "button" && active) ? "#1a1a4a" : "#131330";
+      const chipStroke = (etype === "button" && active) ? "#4040a0" : "#252550";
+      g.appendChild(el("rect", {
+        x: ex, y: ey, width: ew, height: eh, rx: 3,
+        fill: chipFill, stroke: chipStroke,
+      }));
+
+      // Label (truncate to fit)
+      const label = (elem.name || elem.id).substring(0, Math.floor(ew / 6));
+      g.appendChild(text(label, {
+        x: ex + 4, y: ey + eh / 2 + 3,
+        fill: active ? "#8080d0" : "#5050a0",
+        "font-size": Math.min(10, eh - 4), "font-family": "monospace",
+      }));
+
+      if (etype === "led") {
+        const r = Math.min(4, eh / 4);
+        g.appendChild(el("circle", {
+          cx: ex + ew - r - 4, cy: ey + eh / 2, r: r,
+          fill: active ? "#3dd68c" : "#222240", stroke: "#333365",
+        }));
+      } else if (etype === "slider") {
+        const barW = Math.min(40, ew * 0.4), barH = Math.min(6, eh * 0.4);
+        const barX = ex + ew - barW - 4, barY = ey + (eh - barH) / 2;
+        const fillW = typeof elem.state === "number" ? elem.state * barW : 0;
+        g.appendChild(el("rect", {
+          x: barX, y: barY, width: barW, height: barH, rx: 2,
+          fill: "#1a1a3a", stroke: "#333365",
+        }));
+        if (fillW > 0) {
+          g.appendChild(el("rect", {
+            x: barX, y: barY, width: fillW, height: barH, rx: 2,
+            fill: "#4080c0",
+          }));
+        }
+      } else {
+        const r = Math.min(4, eh / 4);
+        g.appendChild(el("circle", {
+          cx: ex + ew - r - 4, cy: ey + eh / 2, r: r,
+          fill: active ? "#c0a030" : "#222240", stroke: "#333365",
+        }));
+      }
     });
   }
 

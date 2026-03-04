@@ -40,10 +40,16 @@ class _MainScreenState extends State<MainScreen> {
 
       // Load saved layout and pre-register elements with WebSocket
       // so the hello handshake fires immediately on (re-)connection.
+      final mq = MediaQuery.of(context);
+      final cs = (mq.size.shortestSide / 8).clamp(40.0, 80.0);
+      final gridCols = (mq.size.width / cs).floor();
+      final gridRows = (mq.size.height / cs).floor();
       LayoutStorageService().load().then((layout) {
         if (layout.elements.isNotEmpty) {
           wsService.setHelloElements(
             layout.elements.map((e) => e.toJson()).toList(),
+            gridCols: gridCols,
+            gridRows: gridRows,
           );
         }
       });

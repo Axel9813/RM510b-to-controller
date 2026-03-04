@@ -67,6 +67,8 @@ const ConfigEditor = (() => {
   let _elements = {};
   let _profiles = [];
   let _activeProfile = "default";
+  let _gridCols = 0;
+  let _gridRows = 0;
 
   // ---- REST helpers ---------------------------------------------------------
 
@@ -108,6 +110,8 @@ const ConfigEditor = (() => {
       _mappings = status.mappings || {};
       _elements = status.elements || {};
       _profiles = status.profiles || [_activeProfile];
+      if (status.grid_cols) _gridCols = status.grid_cols;
+      if (status.grid_rows) _gridRows = status.grid_rows;
       renderAll();
     } catch (e) {
       window.App?.toast("Failed to load config: " + e.message, "error");
@@ -118,6 +122,7 @@ const ConfigEditor = (() => {
     renderProfiles();
     renderMappings();
     renderElements();
+    _syncScreenElements();
   }
 
   // ---- Profile section ------------------------------------------------------
@@ -585,16 +590,36 @@ const ConfigEditor = (() => {
 
   // ---- External: update registry from WS message ----------------------------
 
-  function loadRegistry(registry) {
+  function loadRegistry(registry, gridCols, gridRows) {
     _elements = registry || {};
+    if (gridCols) _gridCols = gridCols;
+    if (gridRows) _gridRows = gridRows;
     renderElements();
-    // Update screen chips — map to {name, id, state} shape expected by setScreenElements
+    _syncScreenElements();
+  }
+
+  function updateElementState(elementId, value) {
+    if (_elements[elementId]) {
+      _elements[elementId].current_value = value;
+    }
+    renderElements();
+    _syncScreenElements();
+  }
+
+  function _syncScreenElements() {
     RCV.setScreenElements(
       Object.entries(_elements).map(([id, e]) => ({
         id,
         name: e.display_name || id,
+        type: e.element_type || "button",
         state: e.current_value ?? false,
+        gridX: e.grid_x ?? 0,
+        gridY: e.grid_y ?? 0,
+        gridW: e.grid_w ?? 3,
+        gridH: e.grid_h ?? 2,
       })),
+      _gridCols,
+      _gridRows,
     );
   }
 
@@ -622,6 +647,7 @@ const ConfigEditor = (() => {
   return {
     init,
     loadRegistry,
+    updateElementState,
     renderAll,
     loadAll,
     _getMappings: () => _mappings,
