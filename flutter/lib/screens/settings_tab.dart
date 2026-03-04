@@ -47,9 +47,8 @@ class _SettingsTabState extends State<SettingsTab> {
           ),
           _StatusRow(
             label: 'Pico',
-            connected: false,
+            connected: picoService.status == 'connected',
             detail: picoService.status,
-            icon: Icons.circle_outlined,
           ),
           _StatusRow(
             label: 'WS Server',

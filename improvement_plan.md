@@ -49,15 +49,11 @@ Fixes:
    - **Dynamic grid dimensions:** Flutter hello message now includes `gridCols`/`gridRows` (computed from `MediaQuery` screen size and cellSize formula). Python stores and exposes them via REST `/api/status` and WebSocket `initial_state`/`registry_update`. Frontend uses these to scale the SVG screen grid accurately. Fallback to 16×9 if RC hasn't connected yet.
    - Added `_syncScreenElements()` call to `renderAll()` so the REST load path (initial page load, profile switches) also syncs the SVG screen — previously only the WebSocket path did.
 
-4. In Flutter app interface Pico status indicator not changing (leftover from time when it was not fully implemented).
+4. ~~DONE~~ In Flutter app interface Pico status indicator not changing (leftover from time when it was not fully implemented).
 
-   **Root cause analysis:**
-   - In `settings_tab.dart` line 50, the `connected` parameter is **hardcoded to `false`**: `_StatusRow(label: 'Pico', connected: false, ...)`.
-   - The status text (`picoService.status`) updates correctly via `notifyListeners()`, but the visual indicator (green/red dot) never changes.
-
-   **Plan of approach:**
-   - [ ] Change `connected: false` to `connected: picoService.status == 'connected'` in `settings_tab.dart`.
-   - [ ] Verify that `PicoService` is properly registered as a `ChangeNotifier` and that the settings tab rebuilds when status changes.
+   **What was done:**
+   - Changed `connected: false` to `connected: picoService.status == 'connected'` in `settings_tab.dart`.
+   - Verified `PicoService` extends `ChangeNotifier` and settings tab uses `context.watch<PicoService>()` — rebuilds automatically on status changes.
 
 5. ~~DONE~~ On customizable interface on PC frontend displayed nonexistent "Test" button.
 
