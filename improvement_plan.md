@@ -62,21 +62,14 @@ Fixes:
    - On each RC connection, the Flutter app sends its current element list via hello. Elements deleted on the RC are now automatically removed from the server registry and the PC frontend.
    - No more orphaned entries accumulating — the registry stays in sync with the Flutter app's actual interface layout.
 
-6. system_actions pycaw not available ('AudioDevice' object has no attribute 'Activate') — volume_set will not work.
+6. ~~DONE~~ system_actions pycaw not available ('AudioDevice' object has no attribute 'Activate') — volume_set will not work.
 
-   **Root cause analysis:**
-   - `system_actions.py` line 38 calls `_devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)` on the object returned by `AudioUtilities.GetSpeakers()`.
-   - The installed pycaw version (>=20240210) may have a different API than what the code expects.
-   - Missing COM initialization (`CoInitialize()`) before accessing COM objects at module import time.
-   - The error is caught and pycaw is silently disabled, but volume control becomes unavailable.
-
-   **Plan of approach:**
-   - [ ] Add explicit `comtypes.CoInitialize()` call before pycaw initialization.
-   - [ ] Update the `Activate()` call to use the correct pycaw API for the installed version. Modern pycaw: `_devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)` should work if `_devices` is the raw COM pointer — check if `GetSpeakers()` returns an `AudioDevice` wrapper instead.
-   - [ ] If pycaw wraps the COM object, access the underlying pointer: `_devices._audio_device.Activate(...)` or use `AudioUtilities.CreateDevice(...)`.
-   - [ ] Pin pycaw version in requirements.txt to a known working version if API keeps changing.
-   - [ ] Add a fallback using `ctypes` + Windows `IAudioEndpointVolume` COM interface directly if pycaw fails.
-   - [ ] Log the specific pycaw version on startup for easier debugging.
+   **What was done:**
+   - Root cause: pycaw v20251023 changed `AudioUtilities.GetSpeakers()` to return an `AudioDevice` wrapper instead of a raw COM `IMMDevice`. The old code called `.Activate()` which doesn't exist on the wrapper.
+   - Fixed by using `speakers.EndpointVolume` property (returns `IAudioEndpointVolume` directly) instead of manual `Activate()` + `QueryInterface()`.
+   - Added `comtypes.CoInitialize()` before pycaw initialization for thread safety.
+   - Elevated log level from `info` to `warning` on failure so it's visible in normal output.
+   - Removed unused `IAudioEndpointVolume` and `CLSCTX_ALL` imports.
 
 ---
 
@@ -180,17 +173,26 @@ Improvements:
    - [ ] Add new element types to the "Add Element" picker in the builder UI.
    - **Estimated scope:** ~800 lines Dart + ~200 lines Python.
 
-   5.3. Implement interface for streaming data into PC app to be displayed on RC.
+   5.3. Implement bidirectional state sync for interface elements (PC→RC).
 
-   **Currently:** One-way RC→PC for input, PC→RC only for LED state updates.
+   **Currently:** One-way RC→PC for input, PC→RC only for LED state updates. Slider elements (e.g. volume_set) have no way to reflect the current system state back on the RC.
+
+   **Research findings:**
+   - `element_update` message already exists and is handled by Flutter for LEDs (`interface_tab.dart` line 73). Sliders are NOT handled — only `LedElement.copyWithState()` is called.
+   - `SliderElement` model has no `currentValue` field (unlike `LedElement.currentState`).
+   - pycaw v20251023 supports `IAudioEndpointVolumeCallback` via `RegisterControlChangeNotify()` for real-time volume change detection. Alternatively, polling `GetMasterVolumeLevelScalar()` in the existing 20Hz monitor loop avoids COM threading complexity.
+   - The existing `_schedule_push_to_rc()` + `element_update` pattern works for pushing state to RC.
+   - Reverse lookup needed: scan registry for elements with `on_change.action == "system"` and `on_change.fn == "volume_set"` to know which slider to update.
 
    **Plan of approach:**
-   - [ ] Define new WebSocket message type `data_stream` (server→RC) carrying `{element_id, value}`.
-   - [ ] Add batch variant `data_stream_batch` for efficiency.
-   - [ ] In Flutter, handle `data_stream` messages and update output elements' display values.
-   - [ ] In Python, add `stream_to_rc(element_id, value)` method to `output_manager.py`.
-   - [ ] Create a simple plugin API for Python scripts to push data to RC display elements.
-   - **Estimated scope:** ~100 lines Dart + ~150 lines Python.
+   - [ ] Add `currentValue` field to `SliderElement` model (like `LedElement.currentState`), with `copyWithValue()`.
+   - [ ] Extend `element_update` handler in `interface_tab.dart` to handle slider elements (update `currentValue`, rebuild UI).
+   - [ ] Update `SliderElementWidget` to use `element.currentValue` as the slider position when receiving server updates.
+   - [ ] Add `get_volume()` method to `SystemActions` that returns current volume (0.0–1.0) via `GetMasterVolumeLevelScalar()`.
+   - [ ] Add volume polling in `OutputManager` or the monitor broadcast loop: compare with last known value, push `element_update` to RC + browser monitors when changed.
+   - [ ] Generalize: `OutputManager.poll_system_state()` scans registry for `volume_set` sliders and pushes current volume as their state. Extensible to other system state sources later.
+   - [ ] Include slider `current_value` in `get_full_state()` so RC gets correct positions on connect.
+   - **Estimated scope:** ~80 lines Dart + ~60 lines Python.
 
    5.4. Add ability to paint elements in some colors.
 

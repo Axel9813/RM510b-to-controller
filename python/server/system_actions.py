@@ -31,16 +31,16 @@ _pycaw_master: Optional[object] = None
 
 if platform.system() == "Windows":
     try:
-        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume  # type: ignore
-        from comtypes import CLSCTX_ALL  # type: ignore
+        import comtypes  # type: ignore
+        comtypes.CoInitialize()
+        from pycaw.pycaw import AudioUtilities  # type: ignore
 
-        _devices = AudioUtilities.GetSpeakers()
-        _interface = _devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        _pycaw_master = _interface.QueryInterface(IAudioEndpointVolume)
+        _speakers = AudioUtilities.GetSpeakers()
+        _pycaw_master = _speakers.EndpointVolume
         log.info("pycaw initialised — absolute volume control available.")
     except Exception as exc:
         _pycaw_master = None
-        log.info("pycaw not available (%s) — volume_set will not work.", exc)
+        log.warning("pycaw not available (%s) — volume_set will not work.", exc)
 
 # ---------------------------------------------------------------------------
 # Key name → pynput Key mapping
