@@ -107,25 +107,22 @@ Improvements:
    - [ ] Update the config editor frontend to show device-aware field selection.
    - **Estimated scope:** ~300 lines Python.
 
-3. Capture gyro/accelerometer data and use it as additional input axes.
+3. ~~DONE~~ Capture gyro/accelerometer data and use it as additional input axes.
 
-   **Research findings:**
-   - DJI RC uses Rockchip RK3399 which typically has integrated IMU sensors.
-   - No sensor packages currently in pubspec.yaml.
-   - Android sensor API is well-supported via `sensors_plus` Flutter package.
-   - Sensor data would add 6 new axes: accelX/Y/Z + gyroX/Y/Z.
-
-   **Plan of approach:**
-   - [ ] First, verify sensor availability on actual DJI RC hardware by reading `/sys/class/input/` or using a test app.
-   - [ ] Add `sensors_plus: ^4.0.0` to pubspec.yaml.
-   - [ ] Create `MotionService` (ChangeNotifier) that subscribes to accelerometer and gyroscope streams.
-   - [ ] Extend `RcState` (both Kotlin and Dart) with `accelX/Y/Z`, `gyroX/Y/Z` fields.
-   - [ ] Merge motion data into the WebSocket rc_state payload at the existing 50Hz rate.
-   - [ ] Add `accelX`, `gyroX` etc. to `AXIS_FIELDS` in `input_router.py` with configurable scaling.
-   - [ ] Add optional low-pass filter (configurable alpha) to reduce jitter.
-   - [ ] Add gyro/accel visualisation to the web frontend.
-   - **Risk:** Android may restrict sensor access without root on DJI RC. Test first.
-   - **Estimated scope:** ~200 lines Kotlin/Dart + ~100 lines Python.
+   **What was done:**
+   - Confirmed DJI RC has ICM4x6xx accelerometer + gyroscope (500Hz, no permissions required) via ADB `dumpsys sensorservice`.
+   - Chose Game Rotation Vector (fused accel+gyro, Qualcomm hardware fusion) as primary sensor — no drift on pitch/roll, slow yaw drift. Runtime toggle to full Rotation Vector (adds magnetometer) available.
+   - **Kotlin `SensorPlugin.kt`** (NEW): Native sensor reader implementing MethodCallHandler + StreamHandler + SensorEventListener. MethodChannel `com.dji.rc/sensor` (start/stop/zero/setSensorType/status), EventChannel `com.dji.rc/sensor_state` streaming `[pitch, yaw, roll]` radians at 50Hz. Computes relative orientation via `R_ref^T × R_current` matrix multiplication, Euler extraction via `SensorManager.getOrientation()`. Thread-safe `@Volatile refMatrix` with local snapshot pattern. NaN guard on output.
+   - **Flutter `GyroService`** (NEW): ChangeNotifier storing pitch/yaw/roll doubles. Methods: start/stop/zero/setSensorType.
+   - **Flutter `main_screen.dart`**: Merges gyro values into WebSocket state JSON (`gyroPitch`/`gyroYaw`/`gyroRoll`). Both rcService and gyroService trigger sendState. Listens for incoming `gyro_zero`/`gyro_set_sensor` WebSocket commands from PC.
+   - **Python `input_router.py`**: Full gyro processing pipeline — push-to-activate gating (suppress activate button's normal mapping), PC-side auto-zero offset on activate press (no round-trip latency), per-axis deadzone→sensitivity→invert→action dispatch. vJoy axis output: radians scaled to ±660. Mouse output: tilt-as-velocity via `SystemActions.mouse_move()`. Axes zeroed on activate button release. NaN/Inf guard on all gyro values.
+   - **Python `system_actions.py`**: Added `mouse_move(dx, dy)` using pynput MouseController for relative cursor movement.
+   - **Python `config_manager.py`**: `DEFAULT_GYRO_CONFIG` with full defaults, `gyro_config()`/`set_gyro_config()` accessors.
+   - **Python `server.py`**: REST endpoints GET/PATCH `/api/config/gyro`, POST `/api/gyro/zero`, POST `/api/gyro/sensor-type`. Deep merge on PATCH to preserve nested axis sub-dicts. Forwards zero/sensor-type commands to RC via WebSocket.
+   - **Frontend config**: Dedicated "Gyro / Motion Control" collapsible section with enable toggle, sensor type dropdown, activate button dropdown, per-axis config (action/vjoy_axis/mouse_axis/sensitivity slider/invert), deadzone, mouse speed, zero button. Locked button row in input mappings shows "GYRO ACTIVATE" badge when a button is configured as gyro activator.
+   - **Frontend monitor**: Horizontal bar gauges (pitch=blue, yaw=green, roll=orange) showing real-time gyro deflection below RC visualizer SVG. Center-origin bars with numeric labels.
+   - **Profile JSON**: `gyro_config` block with `enabled`, `sensor_type`, `activate_button`, `deadzone`, `mouse_speed`, and per-axis `pitch`/`roll`/`yaw` sub-objects.
+   - **Orientation lock**: Flutter app locked to landscape.
 
 4. Implement additional transports for PC-controller connection (Bluetooth/USB).
 
@@ -240,3 +237,14 @@ Improvements:
    - [ ] Add `vjoy_devices` list to `server.json` (fallback to single `vjoy_device_id` for compat).
    - [ ] Show per-device status in the PC frontend (axes in use, active/inactive).
    - **Estimated scope:** ~150 lines Python refactoring.
+
+---
+
+Known issues (backlog):
+
+- **Pico connected detection flawed:** `app.js` uses `!!picoBitmask` to detect Pico connection. When no Pico buttons are pressed, bitmask is 0, so Pico appears disconnected. Need to add a separate `picoConnected` boolean from Flutter side or check field presence differently.
+- **Profile switch loses button/gyro state:** `_rebuild_router()` discards `_prev` state and `_gyro_offset`. Buttons held during profile switch get stuck; gyro offset resets causing a jump. Should carry over `_prev` or explicitly release all buttons/zero all axes on rebuild.
+- **Profile name path traversal:** Profile names from REST API are used unsanitized in file paths. Names like `../../foo` could write outside the profiles directory. Need to validate profile names (alphanumeric + underscore only).
+- **Flutter services not disposed on hot restart:** Services created in `main()` with `ChangeNotifierProvider.value()` are never disposed. Port conflicts on hot restart. Should use `ChangeNotifierProvider(create:)` or add explicit disposal.
+- **Config editor "Save All" duplicate listeners:** Fixed with `_hasListener` guard, but ideally should move to `init()`.
+- **Shallow copy of DEFAULT_PROFILE/DEFAULT_GYRO_CONFIG:** `{**DEFAULT_GYRO_CONFIG}` only shallow-copies top level; nested pitch/roll/yaw dicts are shared refs. Safe now (written to disk immediately) but latent bug if flow changes.

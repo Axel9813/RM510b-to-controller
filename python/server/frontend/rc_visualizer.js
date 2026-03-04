@@ -706,5 +706,88 @@ const RCV = (() => {
     setSwitch(swF ? "f" : swS ? "s" : "n");
   }
 
-  return { build, update, setScreenElements };
+  // ---- Gyro readout display (bar gauges) ------------------------------------
+
+  // Max radians for full-scale bar deflection (≈45°)
+  const GYRO_BAR_MAX = 0.785;
+
+  function _buildGyroBar(axis) {
+    const row = document.createElement("div");
+    row.className = "gyro-bar-row";
+
+    const label = document.createElement("span");
+    label.className = `gyro-bar-label ${axis}`;
+    label.textContent = axis[0].toUpperCase();
+
+    const track = document.createElement("div");
+    track.className = "gyro-bar-track";
+
+    const fill = document.createElement("div");
+    fill.className = `gyro-bar-fill ${axis}`;
+    fill.id = `gyro-fill-${axis}`;
+    track.appendChild(fill);
+
+    const value = document.createElement("span");
+    value.className = "gyro-bar-value";
+    value.id = `gyro-val-${axis}`;
+    value.textContent = "0.000";
+
+    row.appendChild(label);
+    row.appendChild(track);
+    row.appendChild(value);
+    return row;
+  }
+
+  function updateGyroReadout(s) {
+    let container = document.getElementById("gyro-readout");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "gyro-readout";
+      container.className = "gyro-readout";
+
+      const title = document.createElement("div");
+      title.className = "gyro-readout-title";
+      title.textContent = "Gyro";
+      container.appendChild(title);
+
+      container.appendChild(_buildGyroBar("pitch"));
+      container.appendChild(_buildGyroBar("yaw"));
+      container.appendChild(_buildGyroBar("roll"));
+
+      const vizContainer = document.getElementById("rc-visualizer-container");
+      if (vizContainer) vizContainer.parentNode.insertBefore(container, vizContainer.nextSibling);
+    }
+
+    const dz = 0.02;
+    const axes = [
+      ["pitch", s.gyroPitch || 0],
+      ["yaw",   s.gyroYaw   || 0],
+      ["roll",  s.gyroRoll  || 0],
+    ];
+
+    for (const [axis, raw] of axes) {
+      const fill = document.getElementById(`gyro-fill-${axis}`);
+      const val  = document.getElementById(`gyro-val-${axis}`);
+      if (!fill || !val) continue;
+
+      const active = Math.abs(raw) > dz;
+      // Normalize to -1..+1 range, clamp
+      const norm = Math.max(-1, Math.min(1, raw / GYRO_BAR_MAX));
+      // Bar: 50% = center. Positive → grows right from center, negative → grows left.
+      const pct = Math.abs(norm) * 50; // 0–50% of track width
+      if (norm >= 0) {
+        fill.style.left = "50%";
+        fill.style.width = pct + "%";
+      } else {
+        fill.style.left = (50 - pct) + "%";
+        fill.style.width = pct + "%";
+      }
+      fill.className = `gyro-bar-fill ${axis}` + (active ? "" : " idle");
+
+      val.textContent = raw.toFixed(3);
+      val.className = "gyro-bar-value" + (active ? " active" : "");
+    }
+  }
+
+  return { build, update, setScreenElements, updateGyroReadout };
 })();

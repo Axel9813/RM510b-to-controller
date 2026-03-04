@@ -69,6 +69,16 @@ const ConfigEditor = (() => {
   let _activeProfile = "default";
   let _gridCols = 0;
   let _gridRows = 0;
+  let _gyroConfig = {
+    enabled: false,
+    sensor_type: "game",
+    activate_button: null,
+    deadzone: 0.02,
+    mouse_speed: 10,
+    pitch: { action: "none", vjoy_axis: "SL0", mouse_axis: "y", sensitivity: 1.0, invert: false },
+    roll:  { action: "none", vjoy_axis: "SL1", mouse_axis: "x", sensitivity: 1.0, invert: false },
+    yaw:   { action: "none", vjoy_axis: "RZ",  mouse_axis: "x", sensitivity: 1.0, invert: false },
+  };
 
   // ---- REST helpers ---------------------------------------------------------
 
@@ -112,6 +122,7 @@ const ConfigEditor = (() => {
       _profiles = status.profiles || [_activeProfile];
       if (status.grid_cols) _gridCols = status.grid_cols;
       if (status.grid_rows) _gridRows = status.grid_rows;
+      if (status.gyro_config) _gyroConfig = status.gyro_config;
       renderAll();
     } catch (e) {
       window.App?.toast("Failed to load config: " + e.message, "error");
@@ -122,6 +133,7 @@ const ConfigEditor = (() => {
     renderProfiles();
     renderMappings();
     renderElements();
+    renderGyroConfig();
     _syncScreenElements();
   }
 
@@ -282,16 +294,24 @@ const ConfigEditor = (() => {
     if (!tbody) return;
     tbody.innerHTML = "";
 
+    const gyroActivateBtn = _gyroConfig.enabled ? _gyroConfig.activate_button : null;
+
     for (const [inputId, meta] of Object.entries(INPUT_LABELS)) {
+      const isGyroActivator = inputId === gyroActivateBtn;
       const mapping = _mappings[inputId] || { action: "none" };
       const tr = document.createElement("tr");
       if (meta.source === "pico") tr.classList.add("pico-row");
+      if (isGyroActivator) tr.classList.add("gyro-locked-row");
       tr.innerHTML = `
         <td><span class="input-label">${meta.label}</span></td>
         <td><span class="source-badge ${meta.source}">${meta.source.toUpperCase()}</span></td>
         <td><span style="color:var(--text-dim);font-size:11px">${meta.type}</span></td>
-        <td>${actionBadgeHtml(mapping)}</td>
-        <td><button class="btn btn-sm btn-secondary edit-mapping-btn" data-id="${inputId}">Edit</button></td>
+        <td>${isGyroActivator
+          ? '<span class="action-badge gyro">GYRO ACTIVATE</span>'
+          : actionBadgeHtml(mapping)}</td>
+        <td>${isGyroActivator
+          ? '<span style="color:var(--text-dim);font-size:11px">Used for gyro</span>'
+          : `<button class="btn btn-sm btn-secondary edit-mapping-btn" data-id="${inputId}">Edit</button>`}</td>
       `;
       tbody.appendChild(tr);
     }
@@ -300,9 +320,11 @@ const ConfigEditor = (() => {
       btn.addEventListener("click", () => openMappingEditor(btn.dataset.id));
     });
 
-    document
-      .getElementById("btn-save-mappings")
-      ?.addEventListener("click", saveAllMappings);
+    const saveBtn = document.getElementById("btn-save-mappings");
+    if (saveBtn && !saveBtn._hasListener) {
+      saveBtn.addEventListener("click", saveAllMappings);
+      saveBtn._hasListener = true;
+    }
   }
 
   function buildActionForm(inputId, currentMapping) {
@@ -621,6 +643,143 @@ const ConfigEditor = (() => {
       _gridCols,
       _gridRows,
     );
+  }
+
+  // ---- Gyro Config section ---------------------------------------------------
+
+  const GYRO_AXIS_ACTIONS = [
+    { value: "none", label: "Disabled" },
+    { value: "vjoy_axis", label: "vJoy Axis" },
+    { value: "mouse_move", label: "Mouse Move" },
+  ];
+
+  function renderGyroConfig() {
+    const container = document.getElementById("gyro-config-fields");
+    if (!container) return;
+
+    const g = _gyroConfig;
+    const buttonOptions = Object.entries(INPUT_LABELS)
+      .filter(([, m]) => m.type === "button")
+      .map(([id, m]) => `<option value="${id}"${g.activate_button === id ? " selected" : ""}>${m.label}</option>`)
+      .join("");
+
+    container.innerHTML = `
+      <div class="form-row">
+        <label><input type="checkbox" id="gyro-enabled" ${g.enabled ? "checked" : ""} /> Enable gyro input</label>
+      </div>
+      <div class="form-row">
+        <label>Sensor type</label>
+        <select id="gyro-sensor-type">
+          <option value="game"${g.sensor_type === "game" ? " selected" : ""}>Game Rotation (no magnetometer)</option>
+          <option value="full"${g.sensor_type === "full" ? " selected" : ""}>Full Rotation (with magnetometer)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Activate button (hold to enable gyro)</label>
+        <select id="gyro-activate-btn">
+          <option value=""${!g.activate_button ? " selected" : ""}>Always active</option>
+          ${buttonOptions}
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Deadzone (rad)</label>
+        <input type="number" id="gyro-deadzone" min="0" max="0.3" step="0.005" value="${g.deadzone ?? 0.02}" style="width:80px" />
+      </div>
+      <div class="form-row">
+        <label>Mouse speed</label>
+        <input type="number" id="gyro-mouse-speed" min="1" max="100" step="1" value="${g.mouse_speed ?? 10}" style="width:80px" />
+      </div>
+      <hr style="border-color:var(--border);margin:12px 0" />
+      ${_gyroAxisHtml("Pitch", "pitch", g.pitch || {})}
+      ${_gyroAxisHtml("Yaw", "yaw", g.yaw || {})}
+      ${_gyroAxisHtml("Roll", "roll", g.roll || {})}
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" id="btn-save-gyro">Save Gyro Config</button>
+        <button class="btn btn-secondary btn-sm" id="btn-zero-gyro">Zero / Calibrate</button>
+      </div>
+    `;
+
+    _initGyroSliders();
+    document.getElementById("btn-save-gyro")?.addEventListener("click", saveGyroConfig);
+    document.getElementById("btn-zero-gyro")?.addEventListener("click", async () => {
+      try {
+        await apiPost("/api/gyro/zero", {});
+        window.App?.toast("Gyro zeroed", "success");
+      } catch (e) { window.App?.toast(e.message, "error"); }
+    });
+    document.getElementById("gyro-sensor-type")?.addEventListener("change", async (e) => {
+      try {
+        await apiPost("/api/gyro/sensor-type", { sensor_type: e.target.value });
+        window.App?.toast("Sensor type changed", "success");
+      } catch (e2) { window.App?.toast(e2.message, "error"); }
+    });
+  }
+
+  function _gyroAxisHtml(label, key, cfg) {
+    const actionOpts = GYRO_AXIS_ACTIONS.map(a =>
+      `<option value="${a.value}"${cfg.action === a.value ? " selected" : ""}>${a.label}</option>`
+    ).join("");
+    const axisOpts = VJOY_AXES.map(a =>
+      `<option value="${a}"${(cfg.vjoy_axis || "SL0") === a ? " selected" : ""}>${a}</option>`
+    ).join("");
+
+    return `
+      <div style="margin-bottom:10px;padding:8px;background:var(--bg-card);border-radius:6px">
+        <strong style="font-size:12px;color:var(--text)">${label}</strong>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <select id="gyro-${key}-action" style="width:110px">${actionOpts}</select>
+          <label style="font-size:11px;color:var(--text-dim)">vJoy:</label>
+          <select id="gyro-${key}-vjoy" style="width:60px">${axisOpts}</select>
+          <label style="font-size:11px;color:var(--text-dim)">Mouse:</label>
+          <select id="gyro-${key}-mouse" style="width:50px">
+            <option value="x"${(cfg.mouse_axis ?? "x") === "x" ? " selected" : ""}>X</option>
+            <option value="y"${(cfg.mouse_axis ?? "x") === "y" ? " selected" : ""}>Y</option>
+          </select>
+          <label style="font-size:11px;color:var(--text-dim)">Sens:</label>
+          <input type="range" id="gyro-${key}-sens" min="0.1" max="5" step="0.1" value="${cfg.sensitivity ?? 1.0}" style="width:80px" />
+          <span id="gyro-${key}-sens-val" style="font-size:11px;font-family:monospace;min-width:28px">${(cfg.sensitivity ?? 1.0).toFixed(1)}</span>
+          <label style="font-size:11px"><input type="checkbox" id="gyro-${key}-invert" ${cfg.invert ? "checked" : ""} /> Inv</label>
+        </div>
+      </div>
+    `;
+  }
+
+  async function saveGyroConfig() {
+    const cfg = {
+      enabled: document.getElementById("gyro-enabled")?.checked ?? false,
+      sensor_type: document.getElementById("gyro-sensor-type")?.value || "game",
+      activate_button: document.getElementById("gyro-activate-btn")?.value || null,
+      deadzone: parseFloat(document.getElementById("gyro-deadzone")?.value ?? "0.02"),
+      mouse_speed: parseInt(document.getElementById("gyro-mouse-speed")?.value ?? "10"),
+    };
+    for (const key of ["pitch", "yaw", "roll"]) {
+      cfg[key] = {
+        action: document.getElementById(`gyro-${key}-action`)?.value || "none",
+        vjoy_axis: document.getElementById(`gyro-${key}-vjoy`)?.value || "SL0",
+        mouse_axis: document.getElementById(`gyro-${key}-mouse`)?.value || "x",
+        sensitivity: parseFloat(document.getElementById(`gyro-${key}-sens`)?.value ?? "1.0"),
+        invert: document.getElementById(`gyro-${key}-invert`)?.checked ?? false,
+      };
+    }
+    try {
+      const result = await apiPatch("/api/config/gyro", cfg);
+      _gyroConfig = result.gyro_config || cfg;
+      renderMappings(); // refresh locked button state
+      window.App?.toast("Gyro config saved", "success");
+    } catch (e) {
+      window.App?.toast(e.message, "error");
+    }
+  }
+
+  // Wire up sensitivity slider live display
+  function _initGyroSliders() {
+    for (const key of ["pitch", "yaw", "roll"]) {
+      const slider = document.getElementById(`gyro-${key}-sens`);
+      const display = document.getElementById(`gyro-${key}-sens-val`);
+      if (slider && display) {
+        slider.addEventListener("input", () => { display.textContent = parseFloat(slider.value).toFixed(1); });
+      }
+    }
   }
 
   // ---- Section collapse toggles ---------------------------------------------

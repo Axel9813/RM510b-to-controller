@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../services/rc_state_service.dart';
 import '../services/pico_service.dart';
+import '../services/gyro_service.dart';
 import '../services/discovery_service.dart';
 import '../services/websocket_service.dart';
 
@@ -28,6 +29,7 @@ class _SettingsTabState extends State<SettingsTab> {
   Widget build(BuildContext context) {
     final rcService = context.watch<RcStateService>();
     final picoService = context.watch<PicoService>();
+    final gyroService = context.watch<GyroService>();
     final announce = context.watch<AnnouncementService>();
     final ws = context.watch<WebSocketService>();
 
@@ -56,12 +58,44 @@ class _SettingsTabState extends State<SettingsTab> {
             detail: _serverDetail(ws),
           ),
           _StatusRow(
+            label: 'Gyro',
+            connected: gyroService.running,
+            detail: gyroService.running ? 'Running' : 'Stopped',
+          ),
+          _StatusRow(
             label: 'Announce',
             connected: announce.announcing,
             detail: announce.announcing
                 ? 'Broadcasting on UDP $_announcePortDisplay'
                 : 'Stopped',
             icon: Icons.cell_tower,
+          ),
+
+          const Divider(height: 32),
+
+          // ── Gyro controls ───────────────────────────────────────────────
+          Text('Gyro', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: gyroService.running ? gyroService.zero : null,
+                icon: const Icon(Icons.my_location, size: 18),
+                label: const Text('Zero Gyro'),
+              ),
+              const SizedBox(width: 12),
+              if (gyroService.running)
+                Text(
+                  'P: ${gyroService.pitch.toStringAsFixed(2)}  '
+                  'Y: ${gyroService.yaw.toStringAsFixed(2)}  '
+                  'R: ${gyroService.roll.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    color: Colors.grey.shade400,
+                  ),
+                ),
+            ],
           ),
 
           const Divider(height: 32),

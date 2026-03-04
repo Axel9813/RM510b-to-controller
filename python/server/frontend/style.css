@@ -275,6 +275,13 @@ body {
   background: var(--surface3);
   color: var(--text-dim);
 }
+.action-badge.gyro {
+  background: #3a2a10;
+  color: #ffaa44;
+}
+.gyro-locked-row td {
+  opacity: 0.5;
+}
 
 .source-badge {
   font-size: 10px;
@@ -544,4 +551,86 @@ select:focus {
   fill: var(--rc-btn-pico-dim);
   stroke: var(--rc-btn-pico-stroke-dim);
   opacity: 0.6;
+}
+
+/* ---- Gyro readout (monitor tab) ---- */
+.gyro-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 500px;
+  margin: 12px auto 0;
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.gyro-readout-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+.gyro-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+}
+.gyro-bar-label {
+  width: 14px;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  flex-shrink: 0;
+}
+.gyro-bar-label.pitch { color: #5580ff; }
+.gyro-bar-label.yaw   { color: #3dd68c; }
+.gyro-bar-label.roll  { color: #ffaa44; }
+
+.gyro-bar-track {
+  flex: 1;
+  height: 14px;
+  background: var(--surface2);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+/* Center line */
+.gyro-bar-track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--border-hi);
+  z-index: 1;
+}
+.gyro-bar-fill {
+  position: absolute;
+  top: 2px;
+  height: 10px;
+  border-radius: 2px;
+  transition: left 0.04s linear, width 0.04s linear, opacity 0.1s;
+  min-width: 1px;
+}
+.gyro-bar-fill.pitch { background: #5580ff; box-shadow: 0 0 6px rgba(85,128,255,0.4); }
+.gyro-bar-fill.yaw   { background: #3dd68c; box-shadow: 0 0 6px rgba(61,214,140,0.4); }
+.gyro-bar-fill.roll  { background: #ffaa44; box-shadow: 0 0 6px rgba(255,170,68,0.4); }
+.gyro-bar-fill.idle  { opacity: 0.25; box-shadow: none; }
+
+.gyro-bar-value {
+  width: 52px;
+  font-family: monospace;
+  font-size: 11px;
+  text-align: right;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.gyro-bar-value.active {
+  color: var(--text);
 }

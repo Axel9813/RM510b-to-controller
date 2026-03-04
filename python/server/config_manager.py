@@ -25,6 +25,35 @@ DEFAULT_SERVER: dict[str, Any] = {
     "active_profile": "default",
 }
 
+DEFAULT_GYRO_CONFIG: dict[str, Any] = {
+    "enabled": False,
+    "sensor_type": "game",
+    "activate_button": None,
+    "deadzone": 0.02,
+    "mouse_speed": 10,
+    "pitch": {
+        "action": "none",
+        "vjoy_axis": "SL0",
+        "mouse_axis": "y",
+        "sensitivity": 1.0,
+        "invert": False,
+    },
+    "roll": {
+        "action": "none",
+        "vjoy_axis": "SL1",
+        "mouse_axis": "x",
+        "sensitivity": 1.0,
+        "invert": False,
+    },
+    "yaw": {
+        "action": "none",
+        "vjoy_axis": "RZ",
+        "mouse_axis": "x",
+        "sensitivity": 1.0,
+        "invert": False,
+    },
+}
+
 DEFAULT_PROFILE: dict[str, Any] = {
     "profile_name": "default",
     "input_mappings": {
@@ -51,6 +80,7 @@ DEFAULT_PROFILE: dict[str, Any] = {
         "pico_circle": {"action": "none"},
         "pico_arrow":  {"action": "none"},
     },
+    "gyro_config": {**DEFAULT_GYRO_CONFIG},
     "element_registry": {},
 }
 
@@ -192,6 +222,13 @@ class ConfigManager:
 
     def set_element_registry(self, registry: dict[str, Any]) -> None:
         self._profile["element_registry"] = registry
+        self.save_active_profile()
+
+    def gyro_config(self) -> dict[str, Any]:
+        return self._profile.setdefault("gyro_config", {**DEFAULT_GYRO_CONFIG})
+
+    def set_gyro_config(self, gyro_cfg: dict[str, Any]) -> None:
+        self._profile["gyro_config"] = gyro_cfg
         self.save_active_profile()
 
     def update_element(self, element_id: str, data: dict[str, Any]) -> None:

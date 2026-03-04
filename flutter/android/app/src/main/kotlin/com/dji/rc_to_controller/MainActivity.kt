@@ -12,10 +12,13 @@ class MainActivity : FlutterActivity() {
         private const val RC_EVENT_CHANNEL  = "com.dji.rc/state"
         private const val PICO_METHOD_CHANNEL = "com.dji.rc/pico"
         private const val PICO_EVENT_CHANNEL  = "com.dji.rc/pico_state"
+        private const val SENSOR_METHOD_CHANNEL = "com.dji.rc/sensor"
+        private const val SENSOR_EVENT_CHANNEL  = "com.dji.rc/sensor_state"
     }
 
     private var rcPlugin: RcPlugin? = null
     private var picoPlugin: PicoPlugin? = null
+    private var sensorPlugin: SensorPlugin? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -34,6 +37,12 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, PICO_METHOD_CHANNEL).setMethodCallHandler(pico)
         EventChannel(messenger, PICO_EVENT_CHANNEL).setStreamHandler(pico)
 
+        // IMU Sensor (gyro/accelerometer)
+        val sensor = SensorPlugin(this)
+        sensorPlugin = sensor
+        MethodChannel(messenger, SENSOR_METHOD_CHANNEL).setMethodCallHandler(sensor)
+        EventChannel(messenger, SENSOR_EVENT_CHANNEL).setStreamHandler(sensor)
+
         // WiFi MulticastLock
         MethodChannel(messenger, WifiMulticastLockPlugin.CHANNEL)
             .setMethodCallHandler(WifiMulticastLockPlugin(this))
@@ -44,6 +53,8 @@ class MainActivity : FlutterActivity() {
         rcPlugin = null
         picoPlugin?.dispose()
         picoPlugin = null
+        sensorPlugin?.dispose()
+        sensorPlugin = null
         super.onDestroy()
     }
 }

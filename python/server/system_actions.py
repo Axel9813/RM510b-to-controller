@@ -24,6 +24,12 @@ except ImportError:
         "Install pynput to enable media keys and key combos."
     )
 
+try:
+    from pynput.mouse import Controller as MouseController  # type: ignore
+    _PYNPUT_MOUSE_AVAILABLE = True
+except ImportError:
+    _PYNPUT_MOUSE_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # pycaw (Windows absolute volume) — optional
 # ---------------------------------------------------------------------------
@@ -90,8 +96,11 @@ if _PYNPUT_AVAILABLE:
 class SystemActions:
     def __init__(self) -> None:
         self._kb: Optional[KeyboardController] = None
+        self._mouse: Optional[MouseController] = None
         if _PYNPUT_AVAILABLE:
             self._kb = KeyboardController()
+        if _PYNPUT_MOUSE_AVAILABLE:
+            self._mouse = MouseController()
 
     def execute(self, fn: str, value: float = 0.0) -> None:
         """
@@ -147,6 +156,15 @@ class SystemActions:
                 self._kb.release(mod)
         # On release we don't need to do anything — modifiers were fully
         # pressed+released in the press event already.
+
+    def mouse_move(self, dx: int, dy: int) -> None:
+        """Move the mouse cursor by (dx, dy) pixels relative to current position."""
+        if self._mouse is None:
+            return
+        try:
+            self._mouse.move(dx, dy)
+        except Exception as exc:
+            log.warning("mouse_move failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Internal helpers

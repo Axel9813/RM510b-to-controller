@@ -110,7 +110,10 @@ async def _shutdown() -> None:
 def _rebuild_router() -> None:
     """Re-instantiate InputRouter from current active profile mappings."""
     global input_router
-    input_router = InputRouter(cfg.input_mappings(), vjoy, sys_actions)
+    input_router = InputRouter(
+        cfg.input_mappings(), vjoy, sys_actions,
+        gyro_config=cfg.gyro_config(),
+    )
     log.info("InputRouter rebuilt from profile '%s'.", cfg.active_profile_name())
 
 
@@ -277,6 +280,7 @@ async def api_status() -> JSONResponse:
         "active_profile": cfg.active_profile_name(),
         "profiles": cfg.list_profiles(),
         "mappings": cfg.input_mappings(),
+        "gyro_config": cfg.gyro_config(),
         "elements": output_mgr.get_registry() if output_mgr else {},
         "grid_cols": grid_cols,
         "grid_rows": grid_rows,
@@ -367,6 +371,53 @@ async def api_set_mappings(body: dict[str, Any]) -> JSONResponse:
     cfg.set_input_mappings(body)
     input_router.reload(body)
     return JSONResponse({"status": "saved"})
+
+
+# ---------------------------------------------------------------------------
+# REST — Gyro Config
+# ---------------------------------------------------------------------------
+
+@app.get("/api/config/gyro")
+async def api_get_gyro_config() -> JSONResponse:
+    return JSONResponse(cfg.gyro_config())
+
+
+@app.patch("/api/config/gyro")
+async def api_patch_gyro_config(body: dict[str, Any]) -> JSONResponse:
+    current = cfg.gyro_config()
+    # Deep merge: update nested axis dicts without clobbering siblings
+    for key, val in body.items():
+        if isinstance(val, dict) and isinstance(current.get(key), dict):
+            current[key].update(val)
+        else:
+            current[key] = val
+    cfg.set_gyro_config(current)
+    input_router.reload_gyro_config(current)
+    return JSONResponse({"status": "saved", "gyro_config": current})
+
+
+@app.post("/api/gyro/zero")
+async def api_gyro_zero() -> JSONResponse:
+    """Forward gyro zero/calibrate command to the RC."""
+    if _rc_conn and _rc_conn.connected:
+        await _rc_conn.send({"type": "gyro_zero"})
+        return JSONResponse({"status": "ok"})
+    raise HTTPException(503, "RC not connected")
+
+
+@app.post("/api/gyro/sensor-type")
+async def api_gyro_sensor_type(body: dict[str, Any]) -> JSONResponse:
+    """Forward sensor type change to the RC."""
+    sensor_type = body.get("sensor_type", "game")
+    if _rc_conn and _rc_conn.connected:
+        await _rc_conn.send({"type": "gyro_set_sensor", "sensor_type": sensor_type})
+        # Also update config
+        gyro = cfg.gyro_config()
+        gyro["sensor_type"] = sensor_type
+        cfg.set_gyro_config(gyro)
+        input_router.reload_gyro_config(gyro)
+        return JSONResponse({"status": "ok"})
+    raise HTTPException(503, "RC not connected")
 
 
 # ---------------------------------------------------------------------------

@@ -199,6 +199,7 @@
           // Pico connected = picoBitmask is present and non-zero
           _picoConnected = !!_lastRcState.picoBitmask;
           RCV.update(_lastRcState, _picoConnected);
+          RCV.updateGyroReadout(_lastRcState);
         }
         break;
 
@@ -211,6 +212,7 @@
           // Pico connected = picoBitmask is present and non-zero
           _picoConnected = !!_lastRcState.picoBitmask;
           RCV.update(_lastRcState, _picoConnected);
+          RCV.updateGyroReadout(_lastRcState);
         }
         break;
 

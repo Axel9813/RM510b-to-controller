@@ -6,10 +6,13 @@ Responsibilities:
   - Compare each field against the previous state to detect edges
   - Dispatch axis values and button press/release events to
     VJoyHandler or SystemActions according to the active input_mappings
+  - Process gyro axes (pitch/yaw/roll) with push-to-activate gating,
+    per-axis sensitivity, deadzone, and mouse/vJoy output
 """
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from vjoy_handler import VJoyHandler
@@ -60,6 +63,9 @@ _PICO_BIT_MAP: list[str] = [
     "pico_shutter_full", # bit 9 — full shutter press
 ]
 
+# Gyro: radians → ±660 scale factor (±45° = ±0.785 rad → ±660 at sensitivity 1.0)
+_GYRO_RAD_TO_660 = 660.0 / 0.785
+
 
 def decode_pico_bitmask(bitmask: int) -> dict[str, bool]:
     """Expand the 16-bit picoBitmask into individual named boolean fields."""
@@ -79,17 +85,26 @@ class InputRouter:
         mappings: dict[str, Any],
         vjoy: VJoyHandler,
         sys_actions: SystemActions,
+        gyro_config: dict[str, Any] | None = None,
     ) -> None:
         self._mappings = mappings
         self._vjoy = vjoy
         self._sys = sys_actions
+        self._gyro_config = gyro_config or {}
         # Previous flattened state for edge detection
         self._prev: dict[str, Any] = {}
+        # PC-side gyro offset: captured on activate-button press
+        self._gyro_offset: dict[str, float] = {"gyroPitch": 0.0, "gyroYaw": 0.0, "gyroRoll": 0.0}
 
     def reload(self, mappings: dict[str, Any]) -> None:
         """Hot-reload mappings without losing previous state."""
         self._mappings = mappings
         log.info("InputRouter: mappings reloaded.")
+
+    def reload_gyro_config(self, gyro_config: dict[str, Any]) -> None:
+        """Hot-reload gyro configuration."""
+        self._gyro_config = gyro_config
+        log.info("InputRouter: gyro config reloaded.")
 
     def process(self, rc_state: dict[str, Any]) -> None:
         """
@@ -100,6 +115,9 @@ class InputRouter:
         flat = dict(rc_state)
         bitmask = int(rc_state.get("picoBitmask", 0))
         flat.update(decode_pico_bitmask(bitmask))
+
+        # Which button (if any) is the gyro activate button
+        activate_btn = self._gyro_config.get("activate_button") if self._gyro_config.get("enabled") else None
 
         # Process axes
         for field in AXIS_FIELDS:
@@ -114,6 +132,18 @@ class InputRouter:
         for field in BUTTON_FIELDS:
             curr = bool(flat.get(field, False))
             prev = bool(self._prev.get(field, False))
+
+            # Suppress activate button's normal mapping; capture gyro offset on press
+            if field == activate_btn:
+                if curr and not prev:
+                    self._gyro_offset = {
+                        "gyroPitch": float(flat.get("gyroPitch", 0.0)),
+                        "gyroYaw":   float(flat.get("gyroYaw", 0.0)),
+                        "gyroRoll":  float(flat.get("gyroRoll", 0.0)),
+                    }
+                self._prev[field] = curr
+                continue
+
             if curr == prev:
                 # Always keep vjoy buttons in sync even with no change
                 mapping = self._mappings.get(field, {})
@@ -124,7 +154,83 @@ class InputRouter:
             if mapping:
                 self._dispatch_button(field, curr, mapping)
 
+        # Process gyro
+        self._process_gyro(flat, activate_btn)
+
         self._prev = flat
+
+    # ------------------------------------------------------------------
+    # Gyro processing
+    # ------------------------------------------------------------------
+
+    def _zero_gyro_outputs(self, cfg: dict[str, Any]) -> None:
+        """Reset all gyro-mapped vJoy axes to center (0)."""
+        for gyro_name in ("pitch", "yaw", "roll"):
+            axis_cfg = cfg.get(gyro_name, {})
+            if axis_cfg.get("action") == "vjoy_axis":
+                self._vjoy.set_axis(axis_cfg.get("vjoy_axis", "SL0"), 0)
+
+    def _process_gyro(self, flat: dict[str, Any], activate_btn: str | None) -> None:
+        """Apply gyro → vJoy axis / mouse movement based on gyro_config."""
+        cfg = self._gyro_config
+        if not cfg.get("enabled", False):
+            return
+
+        # Push-to-activate: if activate button is set and not pressed, zero outputs
+        if activate_btn:
+            if not bool(flat.get(activate_btn, False)):
+                self._zero_gyro_outputs(cfg)
+                return
+
+        deadzone = float(cfg.get("deadzone", 0.02))
+        mouse_speed = float(cfg.get("mouse_speed", 10.0))
+
+        # Accumulate mouse deltas across axes
+        mouse_dx = 0.0
+        mouse_dy = 0.0
+
+        for gyro_name, rc_field in [("pitch", "gyroPitch"), ("yaw", "gyroYaw"), ("roll", "gyroRoll")]:
+            raw = float(flat.get(rc_field, 0.0)) - self._gyro_offset.get(rc_field, 0.0)
+            if math.isnan(raw) or math.isinf(raw):
+                continue
+            axis_cfg = cfg.get(gyro_name, {})
+            action = axis_cfg.get("action", "none")
+            if action == "none":
+                continue
+
+            # Apply deadzone (subtract threshold so output starts at 0)
+            if abs(raw) < deadzone:
+                raw = 0.0
+            else:
+                raw = raw - math.copysign(deadzone, raw)
+
+            sensitivity = float(axis_cfg.get("sensitivity", 1.0))
+            invert = bool(axis_cfg.get("invert", False))
+            value = raw * sensitivity
+            if invert:
+                value = -value
+
+            if action == "vjoy_axis":
+                # Scale radians to ±660 range
+                vjoy_val = int(max(-660, min(660, value * _GYRO_RAD_TO_660)))
+                axis_name = axis_cfg.get("vjoy_axis", "SL0")
+                self._vjoy.set_axis(axis_name, vjoy_val)
+
+            elif action == "mouse_move":
+                mouse_axis = axis_cfg.get("mouse_axis", "x")
+                delta = value * mouse_speed
+                if mouse_axis == "x":
+                    mouse_dx += delta
+                else:
+                    mouse_dy += delta
+
+        # Apply accumulated mouse movement
+        idx, idy = int(round(mouse_dx)), int(round(mouse_dy))
+        if idx != 0 or idy != 0:
+            # Clamp to prevent runaway cursor
+            idx = max(-100, min(100, idx))
+            idy = max(-100, min(100, idy))
+            self._sys.mouse_move(idx, idy)
 
     # ------------------------------------------------------------------
     # Dispatch helpers
