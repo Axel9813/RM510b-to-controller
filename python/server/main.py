@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import platform
 import sys
 
 import uvicorn
@@ -37,7 +36,7 @@ from config_manager import config as cfg
 from typing import Optional
 
 from discovery import RcDiscovery, RcEntry, UDP_ANNOUNCE_PORT
-from rc_client import RcConnection
+from transport import TransportManager, WebSocketTransport, UsbTransport, BluetoothTransport
 import server as srv
 
 
@@ -54,11 +53,8 @@ def _print_startup_banner(web_port: int, rc_port: int) -> None:
     print("  Connection mode: OUTBOUND (PC connects to RC)")
     print(f"  RC WebSocket port:    {rc_port}")
     print(f"  Listening for RC announcements on UDP port {UDP_ANNOUNCE_PORT}")
-    print(f"  Checking ADB forward tunnel on localhost:{rc_port}")
-    print()
-    if platform.system() == "Windows":
-        print("  ADB setup (optional, for USB):")
-        print(f"    adb forward tcp:{rc_port} tcp:{rc_port}")
+    print(f"  USB transport:  bundled ADB (auto-detect + forward)")
+    print(f"  Bluetooth:      RFCOMM server (channel 4)")
     print("=" * 64)
     print()
 
@@ -96,54 +92,63 @@ async def _main() -> None:
     srv._rebuild_output_manager()
 
     # ------------------------------------------------------------------
-    # Create RC connection (outbound WebSocket client)
+    # Create transport manager
     # ------------------------------------------------------------------
 
     # We declare discovery early so callbacks can reference it.
     discovery: Optional[RcDiscovery] = None
 
-    def _on_connected() -> None:
-        srv.on_rc_connected()
-        if discovery:
-            discovery.pause()
-
-    def _on_disconnected() -> None:
-        srv.on_rc_disconnected()
-        # rc_client will auto-retry the same URL — don't restart scan yet
-
-    def _on_retries_exhausted() -> None:
-        log.info("RC reconnection failing — resuming discovery scan")
-        if discovery:
-            discovery.resume()
-
-    rc_conn = RcConnection(
+    transport_mgr = TransportManager(
         on_message=srv.handle_rc_message,
-        on_connected=_on_connected,
-        on_disconnected=_on_disconnected,
-        on_retries_exhausted=_on_retries_exhausted,
+        on_connected=lambda t: _on_connected(t, discovery),
+        on_disconnected=lambda t: _on_disconnected(t, discovery),
     )
-    srv.set_rc_connection(rc_conn)
+    srv.set_transport_manager(transport_mgr)
+
+    # Register WebSocket transport
+    ws_transport = WebSocketTransport(
+        on_message=transport_mgr.make_message_handler('websocket'),
+        on_connected=lambda: transport_mgr.on_transport_connected('websocket'),
+        on_disconnected=lambda: transport_mgr.on_transport_disconnected('websocket'),
+        on_retries_exhausted=lambda: discovery.resume() if discovery else None,
+    )
+    transport_mgr.register(ws_transport)
+
+    # Register USB/ADB transport (bundled adb.exe)
+    usb_transport = UsbTransport(
+        on_message=transport_mgr.make_message_handler('usb'),
+        on_connected=lambda: transport_mgr.on_transport_connected('usb'),
+        on_disconnected=lambda: transport_mgr.on_transport_disconnected('usb'),
+        rc_port=rc_port,
+    )
+    transport_mgr.register(usb_transport)
+    await usb_transport.start()
+
+    # Register Bluetooth RFCOMM transport
+    bt_transport = BluetoothTransport(
+        on_message=transport_mgr.make_message_handler('bluetooth'),
+        on_connected=lambda: transport_mgr.on_transport_connected('bluetooth'),
+        on_disconnected=lambda: transport_mgr.on_transport_disconnected('bluetooth'),
+    )
+    transport_mgr.register(bt_transport)
+    await bt_transport.start()
 
     # ------------------------------------------------------------------
-    # Start RC discovery — when an RC is found, connect to it
+    # Start RC discovery — when an RC is found, connect via WiFi
     # ------------------------------------------------------------------
     def _on_rc_found(entry: RcEntry) -> None:
         # Already connected to this RC — skip
-        if rc_conn.connected and rc_conn.url == entry.ws_url:
+        if ws_transport.connected and ws_transport.url == entry.ws_url:
             return
-        # Connected and working — only ADB can take over
-        if rc_conn.connected and entry.method != "adb":
+        # Higher-priority transport (USB) is active — don't switch to WiFi
+        if transport_mgr.connected and transport_mgr.active_type != 'websocket':
             return
-        # Already retrying this same URL — let rc_client continue
-        if not rc_conn.connected and rc_conn.url == entry.ws_url and entry.method != "adb":
+        # Already retrying this same URL — let transport continue
+        if not ws_transport.connected and ws_transport.url == entry.ws_url:
             return
-        # ADB always takes priority over WiFi
-        if entry.method == "adb" and rc_conn.connected:
-            log.info("ADB tunnel detected — switching from WiFi to USB")
-            rc_conn.stop()
 
         log.info("Connecting to RC: %s", entry)
-        rc_conn.start(entry.ws_url)
+        ws_transport.start_with_url(entry.ws_url)
 
     discovery = RcDiscovery(on_rc_found=_on_rc_found, ws_port=rc_port)
     await discovery.start()
@@ -169,10 +174,22 @@ async def _main() -> None:
     try:
         await server.serve()
     finally:
-        rc_conn.stop()
+        transport_mgr.stop_all()
         discovery.stop()
         srv.vjoy.stop()
         log.info("Server stopped.")
+
+
+def _on_connected(transport_type: str, discovery: Optional[RcDiscovery]) -> None:
+    srv.on_rc_connected(transport_type)
+    if discovery:
+        discovery.pause()
+
+
+def _on_disconnected(transport_type: str, discovery: Optional[RcDiscovery]) -> None:
+    srv.on_rc_disconnected(transport_type)
+    if discovery:
+        discovery.resume()
 
 
 def main() -> None:

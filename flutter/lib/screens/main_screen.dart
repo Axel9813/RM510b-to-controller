@@ -7,7 +7,7 @@ import '../services/layout_storage_service.dart';
 import '../services/rc_state_service.dart';
 import '../services/pico_service.dart';
 import '../services/gyro_service.dart';
-import '../services/websocket_service.dart';
+import '../services/transport/transport_manager.dart';
 import 'settings_tab.dart';
 import 'interface_tab.dart';
 
@@ -35,13 +35,13 @@ class _MainScreenState extends State<MainScreen> {
       final rcService = context.read<RcStateService>();
       final picoService = context.read<PicoService>();
       final gyroService = context.read<GyroService>();
-      final wsService = context.read<WebSocketService>();
+      final transport = context.read<TransportManager>();
       _rcService = rcService;
       _gyroService = gyroService;
 
-      // Bridge: push RC state + gyro into WebSocket whenever either changes
+      // Bridge: push RC state + gyro into transport whenever either changes
       void sendState() {
-        if (wsService.status == ConnectionStatus.connected) {
+        if (transport.isConnected) {
           final state = rcService.state.copyWith(
             picoBitmask: picoService.bitmask,
           );
@@ -49,7 +49,7 @@ class _MainScreenState extends State<MainScreen> {
           json['gyroPitch'] = gyroService.pitch;
           json['gyroYaw'] = gyroService.yaw;
           json['gyroRoll'] = gyroService.roll;
-          wsService.sendState(json);
+          transport.sendState(json);
         }
       }
 
@@ -59,7 +59,7 @@ class _MainScreenState extends State<MainScreen> {
       gyroService.addListener(_gyroListener!);
 
       // Listen for commands from PC (e.g. gyro_zero, gyro_set_sensor)
-      _incomingSub = wsService.incoming.listen((msg) {
+      _incomingSub = transport.incoming.listen((msg) {
         final type = msg['type'] as String?;
         if (type == 'gyro_zero') {
           gyroService.zero();
@@ -71,7 +71,7 @@ class _MainScreenState extends State<MainScreen> {
         }
       });
 
-      // Load saved layout and pre-register elements with WebSocket
+      // Load saved layout and pre-register elements with transport
       // so the hello handshake fires immediately on (re-)connection.
       final mq = MediaQuery.of(context);
       final cs = (mq.size.shortestSide / 8).clamp(40.0, 80.0);
@@ -79,7 +79,7 @@ class _MainScreenState extends State<MainScreen> {
       final gridRows = (mq.size.height / cs).floor();
       LayoutStorageService().load().then((layout) {
         if (layout.elements.isNotEmpty) {
-          wsService.setHelloElements(
+          transport.setHelloElements(
             layout.elements.map((e) => e.toJson()).toList(),
             gridCols: gridCols,
             gridRows: gridRows,

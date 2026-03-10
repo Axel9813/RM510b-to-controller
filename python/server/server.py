@@ -1,7 +1,7 @@
 """
 FastAPI application — REST API and browser monitor WebSocket.
 
-The RC connection is handled by rc_client.py (outbound WebSocket client).
+The RC connection is handled by transport/ (pluggable transport layer).
 
 Connections:
   /ws/monitor  — Browser monitor WebSocket (read-only, 20 Hz broadcast)
@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from rc_client import RcConnection
+from transport import TransportManager
 
 from config_manager import config as cfg
 from input_router import InputRouter
@@ -48,35 +48,35 @@ output_mgr: OutputManager = None  # type: ignore[assignment]
 # ---------------------------------------------------------------------------
 # Runtime state
 # ---------------------------------------------------------------------------
-_rc_conn: Optional[RcConnection] = None  # set by main.py via set_rc_connection()
+_transport_mgr: Optional[TransportManager] = None
 _last_rc_state: dict[str, Any] = {}
 _rc_connected: bool = False
 _monitor_clients: set[WebSocket] = set()
 _last_seq: int = 0
 
 
-def set_rc_connection(conn: Optional[RcConnection]) -> None:
-    """Register the outbound RC client connection (called from main.py)."""
-    global _rc_conn
-    _rc_conn = conn
+def set_transport_manager(mgr: Optional[TransportManager]) -> None:
+    """Register the transport manager (called from main.py)."""
+    global _transport_mgr
+    _transport_mgr = mgr
 
 
-def on_rc_connected() -> None:
-    """Called by RcConnection when it connects to the RC."""
+def on_rc_connected(transport_type: str) -> None:
+    """Called by TransportManager when any transport connects to the RC."""
     global _rc_connected
     _rc_connected = True
-    if _rc_conn is not None:
-        output_mgr.set_rc_websocket(_rc_conn)
-    log.info("RC connected (outbound).")
+    if _transport_mgr is not None:
+        output_mgr.set_rc_websocket(_transport_mgr)
+    log.info("RC connected via %s.", transport_type)
 
 
-def on_rc_disconnected() -> None:
-    """Called by RcConnection when it disconnects from the RC."""
+def on_rc_disconnected(transport_type: str) -> None:
+    """Called by TransportManager when the active transport disconnects."""
     global _rc_connected, _last_rc_state
     _rc_connected = False
     _last_rc_state = {}
     output_mgr.set_rc_websocket(None)
-    log.info("RC disconnected.")
+    log.info("RC disconnected (was %s).", transport_type)
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -126,8 +126,8 @@ def _rebuild_output_manager() -> None:
         save_cb=cfg.save_active_profile,
         notify_monitor_cb=_notify_monitors_registry,
     )
-    if _rc_conn and _rc_conn.connected:
-        output_mgr.set_rc_websocket(_rc_conn)
+    if _transport_mgr and _transport_mgr.connected:
+        output_mgr.set_rc_websocket(_transport_mgr)
     log.info("OutputManager loaded profile '%s'.", cfg.active_profile_name())
 
 
@@ -163,17 +163,18 @@ async def _monitor_broadcast_loop() -> None:
             "vjoy_active": vjoy.active,
             "vjoy_error": vjoy.error,
             "rc_state": _last_rc_state,
+            "transport_type": _transport_mgr.active_type if _transport_mgr else None,
         })
         await _broadcast_to_monitors(msg)
 
 
 # ---------------------------------------------------------------------------
-# RC message handler (called by rc_client.py RcConnection)
+# RC message handler (called by transport layer)
 # ---------------------------------------------------------------------------
 
 def handle_rc_message(msg: dict[str, Any]) -> None:
     """Process an incoming message from the RC.
-    Called synchronously from rc_client's message callback.
+    Called synchronously from transport layer's message callback.
     """
     global _last_rc_state, _last_seq
 
@@ -189,8 +190,8 @@ def handle_rc_message(msg: dict[str, Any]) -> None:
 
     elif msg_type == "ping":
         # Application-level ping — reply with pong
-        if _rc_conn is not None:
-            asyncio.ensure_future(_rc_conn.send({"type": "pong"}))
+        if _transport_mgr is not None:
+            asyncio.ensure_future(_transport_mgr.send({"type": "pong"}))
 
     elif msg_type == "hello":
         elements = msg.get("elements", [])
@@ -198,8 +199,8 @@ def handle_rc_message(msg: dict[str, Any]) -> None:
         grid_rows = msg.get("gridRows", 0)
         changed = output_mgr.merge_hello(elements, grid_cols=grid_cols, grid_rows=grid_rows)
         # Respond with full LED state
-        if _rc_conn is not None:
-            asyncio.ensure_future(_rc_conn.send({
+        if _transport_mgr is not None:
+            asyncio.ensure_future(_transport_mgr.send({
                 "type": "elements_full_state",
                 "states": output_mgr.get_full_state(),
             }))
@@ -231,6 +232,7 @@ async def ws_monitor(websocket: WebSocket) -> None:
     await websocket.send_text(json.dumps({
         "type": "initial_state",
         "rc_connected": _rc_connected,
+        "transport_type": _transport_mgr.active_type if _transport_mgr else None,
         "vjoy_active": vjoy.active,
         "vjoy_error": vjoy.error,
         "rc_state": _last_rc_state,
@@ -399,8 +401,8 @@ async def api_patch_gyro_config(body: dict[str, Any]) -> JSONResponse:
 @app.post("/api/gyro/zero")
 async def api_gyro_zero() -> JSONResponse:
     """Forward gyro zero/calibrate command to the RC."""
-    if _rc_conn and _rc_conn.connected:
-        await _rc_conn.send({"type": "gyro_zero"})
+    if _transport_mgr and _transport_mgr.connected:
+        await _transport_mgr.send({"type": "gyro_zero"})
         return JSONResponse({"status": "ok"})
     raise HTTPException(503, "RC not connected")
 
@@ -409,8 +411,8 @@ async def api_gyro_zero() -> JSONResponse:
 async def api_gyro_sensor_type(body: dict[str, Any]) -> JSONResponse:
     """Forward sensor type change to the RC."""
     sensor_type = body.get("sensor_type", "game")
-    if _rc_conn and _rc_conn.connected:
-        await _rc_conn.send({"type": "gyro_set_sensor", "sensor_type": sensor_type})
+    if _transport_mgr and _transport_mgr.connected:
+        await _transport_mgr.send({"type": "gyro_set_sensor", "sensor_type": sensor_type})
         # Also update config
         gyro = cfg.gyro_config()
         gyro["sensor_type"] = sensor_type

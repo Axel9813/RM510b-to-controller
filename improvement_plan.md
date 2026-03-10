@@ -124,25 +124,40 @@ Improvements:
    - **Profile JSON**: `gyro_config` block with `enabled`, `sensor_type`, `activate_button`, `deadzone`, `mouse_speed`, and per-axis `pitch`/`roll`/`yaw` sub-objects.
    - **Orientation lock**: Flutter app locked to landscape.
 
-4. Implement additional transports for PC-controller connection (Bluetooth/USB).
+4. ~~DONE~~ Implement additional transports for PC-controller connection (Bluetooth/USB).
 
-   **Research findings:**
-   - Currently only WebSocket over WiFi. No transport abstraction layer exists.
-   - A complete Bluetooth design already exists in `BLUETOOTH_PLAN.md` (398 lines).
-   - WebSocket code is tightly coupled in both `websocket_service.dart` and `rc_client.py`.
+   **What was done:**
 
-   **Plan of approach:**
-   - [ ] Define abstract `Transport` interface on both sides (Python and Flutter) with `connect()`, `disconnect()`, `send()`, `onMessage` methods.
-   - [ ] Refactor existing WebSocket code into `WebSocketTransport` implementing the abstract interface.
-   - [ ] Implement `BluetoothTransport` per existing `BLUETOOTH_PLAN.md` design:
-     - Python: `AF_BTH` sockets (Windows native) or `pyserial` COM port fallback.
-     - Flutter: `flutter_bluetooth_serial` package, newline-delimited JSON.
-   - [ ] Implement `UsbTransport` for direct USB CDC connection (simpler than Bluetooth):
-     - Python: `pyusb` to open RC as CDC device.
-     - Flutter: reuse existing USB host infrastructure.
-   - [ ] Add transport selection UI in Flutter settings and PC frontend.
-   - [ ] Transport auto-discovery with priority order: USB > Bluetooth > WiFi.
-   - **Estimated scope:** ~500 lines Python + ~400 lines Flutter.
+   *Transport abstraction layer (both sides):*
+   - Defined `RcTransport` abstract base on Flutter (`flutter/lib/services/transport/rc_transport.dart`) and Python (`python/server/transport/base.py`) with `start()`, `stop()`, `send()`, status listeners, and incoming message streams.
+   - `TransportManager` on both sides manages multiple transports, selects the best one by priority, and provides a unified interface. Priority order: USB > WiFi (WebSocket) > Bluetooth.
+   - Python `TransportManager.make_message_handler()` filters incoming messages so only the active transport's data reaches the server — prevents dual-transport data conflicts.
+
+   *USB transport (ADB tunnel):*
+   - Python `UsbTransport` (`python/server/transport/usb_transport.py`): polls for ADB devices, auto-forwards port, delegates to internal `WebSocketTransport` connected to `127.0.0.1`.
+   - Flutter detects USB vs WiFi by checking if the WebSocket client address is `127.0.0.1` (loopback = ADB tunnel).
+   - Bundled `adb.exe` in `python/server/adb/` — no ADB installation required on the PC.
+
+   *Bluetooth RFCOMM transport:*
+   - Python `BluetoothTransport` (`python/server/transport/bluetooth_transport.py`): RFCOMM server on channel 4 using `AF_BTH` (Windows native). Threads for accept/read (IOCP doesn't support `AF_BTH`). SDP registered via `WSASetService` ctypes. Ping/pong handled directly in read thread (no asyncio roundtrip). Only latest `rc_state` per recv batch dispatched to avoid flooding.
+   - Flutter `BluetoothTransport` (`flutter/lib/services/transport/bluetooth_transport.dart`): RFCOMM client using platform channels. Two send paths: `_sendRaw` (state, droppable via `AtomicReference`) and `_sendControl` (ping/hello, guaranteed via `ConcurrentLinkedQueue`). Auto-reconnect with backoff.
+   - Kotlin `BluetoothPlugin` (`flutter/android/.../BluetoothPlugin.kt`): Native RFCOMM client with dedicated read and write threads. `createRfcommSocket(channel)` via reflection (bypasses SDP for DJI RC Android 10). Connection generation counter guards stale `endOfStream` from old read threads. Thread join with timeout on disconnect.
+
+   *Transport manager features:*
+   - Conflict-aware switching: USB and WiFi conflict (both use RC WebSocket server) — old one is stopped. Bluetooth is independent and never stopped when switching.
+   - Fallback on disconnect: when active transport disconnects, manager checks for next-highest-priority connected transport and switches to it.
+   - Preference enforcement: "Auto" / "WiFi only" / "Bluetooth only" dropdown in Flutter settings. Non-preferred transports are stopped to prevent dual-connection data conflicts.
+   - BT target persisted to SharedPreferences; auto-starts on app launch if saved target exists.
+
+   *UI:*
+   - Flutter settings: transport preference dropdown, BT paired device list, connect/disconnect buttons, BT availability check (shows warning if BT is off), error display.
+   - PC frontend (`app.js`): shows "RC: USB", "RC: WiFi", or "RC: BT" based on active transport type.
+
+   *Key files:*
+   - `flutter/lib/services/transport/` — `rc_transport.dart`, `transport_manager.dart`, `websocket_transport.dart`, `bluetooth_transport.dart`
+   - `python/server/transport/` — `__init__.py`, `base.py`, `manager.py`, `websocket_transport.py`, `usb_transport.py`, `bluetooth_transport.py`
+   - `flutter/android/.../BluetoothPlugin.kt`
+   - `flutter/lib/screens/settings_tab.dart` — transport UI section
 
 5. Improve interface customisation:
 
@@ -237,6 +252,36 @@ Improvements:
    - [ ] Add `vjoy_devices` list to `server.json` (fallback to single `vjoy_device_id` for compat).
    - [ ] Show per-device status in the PC frontend (axes in use, active/inactive).
    - **Estimated scope:** ~150 lines Python refactoring.
+
+8. Implement OTA firmware update for Pico from Android (no physical disconnect).
+
+   **Context:** The Pico is integrated into the RC and may be difficult to physically disconnect for firmware updates. Two approaches can flash new firmware over the existing USB connection without unplugging.
+
+   **Approach A: Software BOOTSEL + UF2 mass storage**
+   - Pico firmware listens for a "reboot to bootloader" command over USB CDC serial.
+   - On receiving it, calls `reset_usb_boot(0, 0)` (Pico SDK) which reboots into BOOTSEL mode.
+   - Pico re-enumerates as a USB mass storage device on the RC's USB port.
+   - Android copies the `.uf2` firmware file to the mounted drive.
+   - Pico automatically reboots with new firmware after the file is written.
+   - **Pros:** Simple Pico-side implementation (one function call). Standard UF2 format.
+   - **Cons:** Android USB mass storage write support varies by device/OS version. DJI RC (Android 10) may need custom USB host code to write to the mass storage device. Two USB re-enumerations (CDC → mass storage → CDC) add complexity to the Android side.
+
+   **Approach B: Custom serial flashing protocol**
+   - Pico firmware includes an update handler that stays on the same CDC serial connection.
+   - Android sends a "start update" command; Pico erases flash sectors and enters receive mode.
+   - Android streams the firmware binary in chunks (e.g. 4 KB); Pico writes each chunk to flash.
+   - After all chunks, Pico verifies CRC/checksum and reboots into the new firmware.
+   - **Pros:** No USB re-enumeration — stays on the same serial connection the app already uses. Full control over progress reporting, error handling, and retry logic from the Flutter app. Works reliably on any Android device.
+   - **Cons:** Requires a custom bootloader or update stub in the Pico firmware (~200 lines C). Must handle flash write failures and power-loss safety (e.g. A/B partitions or a recovery stub).
+
+   **Plan of approach:**
+   - [ ] Choose approach (B recommended for reliability on DJI RC).
+   - [ ] Implement update stub in Pico firmware: receive binary over CDC, write to flash, verify CRC, reboot.
+   - [ ] Add firmware file picker in Flutter settings (select `.uf2` or `.bin` from device storage).
+   - [ ] Implement streaming upload in `PicoPlugin.kt`: send chunks via bulk OUT, read ACK/progress from bulk IN.
+   - [ ] Add progress UI in Flutter (progress bar, status text, error display).
+   - [ ] Handle recovery: if update fails mid-write, Pico boots into update stub and waits for retry.
+   - **Estimated scope:** ~200 lines C (Pico) + ~150 lines Kotlin + ~100 lines Dart.
 
 ---
 

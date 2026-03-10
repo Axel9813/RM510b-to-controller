@@ -19,6 +19,7 @@ class MainActivity : FlutterActivity() {
     private var rcPlugin: RcPlugin? = null
     private var picoPlugin: PicoPlugin? = null
     private var sensorPlugin: SensorPlugin? = null
+    private var btPlugin: BluetoothPlugin? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -46,6 +47,12 @@ class MainActivity : FlutterActivity() {
         // WiFi MulticastLock
         MethodChannel(messenger, WifiMulticastLockPlugin.CHANNEL)
             .setMethodCallHandler(WifiMulticastLockPlugin(this))
+
+        // Bluetooth RFCOMM
+        val bt = BluetoothPlugin(this)
+        btPlugin = bt
+        MethodChannel(messenger, BluetoothPlugin.METHOD_CHANNEL).setMethodCallHandler(bt)
+        EventChannel(messenger, BluetoothPlugin.EVENT_CHANNEL).setStreamHandler(bt)
     }
 
     override fun onDestroy() {
@@ -55,6 +62,8 @@ class MainActivity : FlutterActivity() {
         picoPlugin = null
         sensorPlugin?.dispose()
         sensorPlugin = null
+        btPlugin?.dispose()
+        btPlugin = null
         super.onDestroy()
     }
 }

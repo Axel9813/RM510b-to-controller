@@ -95,12 +95,17 @@
   // Status pill helpers
   // ============================================================
 
-  function setRCStatus(connected) {
+  function setRCStatus(connected, transportType) {
     const dot = document.getElementById("rc-status-dot");
     const lbl = document.getElementById("rc-status-label");
     if (!dot || !lbl) return;
     dot.className = "status-dot " + (connected ? "online" : "offline");
-    lbl.textContent = "RC: " + (connected ? "connected" : "offline");
+    if (connected && transportType) {
+      const labels = { websocket: "WiFi", usb: "USB", bluetooth: "BT" };
+      lbl.textContent = "RC: " + (labels[transportType] || transportType);
+    } else {
+      lbl.textContent = "RC: " + (connected ? "connected" : "offline");
+    }
     const notice = document.getElementById("pico-notice");
     if (notice) notice.style.display = connected ? "none" : "";
   }
@@ -190,7 +195,7 @@
     switch (msg.type) {
       case "initial_state":
         // Sent once on connect: full snapshot
-        setRCStatus(msg.rc_connected ?? false);
+        setRCStatus(msg.rc_connected ?? false, msg.transport_type);
         setVJoyStatus(msg.vjoy_active ?? false, msg.vjoy_error);
         if (msg.active_profile) setProfile(msg.active_profile);
         if (msg.registry) ConfigEditor.loadRegistry(msg.registry, msg.grid_cols, msg.grid_rows);
@@ -205,7 +210,7 @@
 
       case "monitor_update":
         // 20 Hz heartbeat
-        setRCStatus(msg.rc_connected ?? false);
+        setRCStatus(msg.rc_connected ?? false, msg.transport_type);
         if (msg.vjoy_active !== undefined) setVJoyStatus(msg.vjoy_active, msg.vjoy_error);
         if (msg.rc_state) {
           _lastRcState = msg.rc_state;

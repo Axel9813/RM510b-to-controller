@@ -1,4 +1,9 @@
 python/server/__pycache__/
+*.log
 
 # Runtime config — auto-created by config_manager.py on first run
 python/server/config/
+
+# Flutter/Android build artifacts
+flutter/android/build/
+flutter/build/

@@ -3,9 +3,10 @@ RC Discovery — finds the RC's WebSocket server on the LAN.
 
 Mechanisms (all OUTBOUND — no inbound traffic needed):
   1. **TCP subnet scan** — probes every /24 LAN IP on the RC's WS port
-  2. **Loopback probe** — checks localhost for ADB forward tunnel
-  3. **UDP listener** — listens for RC broadcast announcements (fallback,
+  2. **UDP listener** — listens for RC broadcast announcements (fallback,
      may be blocked by firewall)
+
+USB/ADB detection is handled by transport/usb_transport.py (bundled ADB).
 """
 from __future__ import annotations
 
@@ -21,7 +22,6 @@ log = logging.getLogger(__name__)
 # ── Shared constants ─────────────────────────────────────────────────────────
 MAGIC_PREFIX       = b"DJI_RC_DISCOVER|"
 UDP_ANNOUNCE_PORT  = 8765
-LOOPBACK_CHECK_INTERVAL = 5.0
 SCAN_INTERVAL      = 15.0        # seconds between subnet scans
 SCAN_BATCH_SIZE    = 64           # concurrent TCP connect attempts
 
@@ -174,37 +174,6 @@ async def _probe_host(
     on_found(entry)
 
 
-# ── Loopback probe (ADB forward tunnel) ─────────────────────────────────────
-
-async def _loopback_probe(
-    port: int,
-    on_found: Callable[[RcEntry], Any],
-    stop_event: asyncio.Event,
-) -> None:
-    """Periodically check localhost:port for an ADB forward tunnel."""
-    while not stop_event.is_set():
-        try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", port),
-                timeout=0.5,
-            )
-            writer.close()
-            await writer.wait_closed()
-            entry = RcEntry(
-                name="USB (ADB)", host="127.0.0.1", port=port, method="adb",
-            )
-            on_found(entry)
-        except Exception:
-            pass
-
-        try:
-            await asyncio.wait_for(stop_event.wait(),
-                                   timeout=LOOPBACK_CHECK_INTERVAL)
-            break
-        except asyncio.TimeoutError:
-            pass
-
-
 # ── UDP announcement listener (fallback — may be blocked by firewall) ───────
 
 class _UdpAnnouncementListener(asyncio.DatagramProtocol):
@@ -251,7 +220,7 @@ class RcDiscovery:
     Discovers RC WebSocket servers on the LAN.
 
     Primary: TCP subnet scan (outbound only, firewall-proof).
-    Secondary: ADB loopback probe, UDP listener.
+    Secondary: UDP listener.
     """
 
     def __init__(
@@ -264,7 +233,6 @@ class RcDiscovery:
         self._udp_transport: Optional[asyncio.DatagramTransport] = None
         self._stop_event: Optional[asyncio.Event] = None
         self._scan_task: Optional[asyncio.Task] = None
-        self._loopback_task: Optional[asyncio.Task] = None
         self._seen: dict[str, float] = {}
 
     async def start(self) -> None:
@@ -275,12 +243,7 @@ class RcDiscovery:
             _tcp_scan_loop(self._ws_port, self._on_found, self._stop_event)
         )
 
-        # 2. Loopback probe (ADB forward)
-        self._loopback_task = asyncio.create_task(
-            _loopback_probe(self._ws_port, self._on_found, self._stop_event)
-        )
-
-        # 3. UDP listener (fallback — may be blocked by firewall)
+        # 2. UDP listener (fallback — may be blocked by firewall)
         loop = asyncio.get_event_loop()
         try:
             self._udp_transport, _ = await loop.create_datagram_endpoint(
@@ -291,12 +254,12 @@ class RcDiscovery:
         except Exception as exc:
             log.warning("UDP listener failed to start: %s", exc)
 
-        log.info("RC discovery started (subnet scan + loopback + UDP listener)")
+        log.info("RC discovery started (subnet scan + UDP listener)")
 
     def pause(self) -> None:
         """Pause active scanning (called when RC is connected).
 
-        Stops the TCP subnet scan and ADB loopback probe.
+        Stops the TCP subnet scan.
         UDP listener stays up (passive, doesn't interfere).
         """
         if self._stop_event:
@@ -306,8 +269,8 @@ class RcDiscovery:
     def resume(self) -> None:
         """Resume active scanning (called when reconnection exhausted).
 
-        Restarts TCP subnet scan and ADB loopback probe with a fresh
-        stop event.  Clears the seen-cache so hosts are re-reported.
+        Restarts TCP subnet scan with a fresh stop event.
+        Clears the seen-cache so hosts are re-reported.
         """
         # Don't double-start
         if self._scan_task and not self._scan_task.done():
@@ -318,9 +281,6 @@ class RcDiscovery:
 
         self._scan_task = asyncio.create_task(
             _tcp_scan_loop(self._ws_port, self._on_found, self._stop_event)
-        )
-        self._loopback_task = asyncio.create_task(
-            _loopback_probe(self._ws_port, self._on_found, self._stop_event)
         )
         log.info("Discovery resumed (searching for RC).")
 

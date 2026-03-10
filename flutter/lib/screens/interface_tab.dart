@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/app_layout.dart';
 import '../models/interface_element.dart';
 import '../services/layout_storage_service.dart';
-import '../services/websocket_service.dart';
+import '../services/transport/transport_manager.dart';
 import '../widgets/builder_overlay.dart';
 
 class InterfaceTab extends StatefulWidget {
@@ -32,7 +32,7 @@ class _InterfaceTabState extends State<InterfaceTab> {
     _loadLayout();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Subscribe to incoming server messages (LED state updates)
-      _wsSub = context.read<WebSocketService>().incoming.listen(_handleServerMessage);
+      _wsSub = context.read<TransportManager>().incoming.listen(_handleServerMessage);
     });
   }
 
@@ -91,7 +91,7 @@ class _InterfaceTabState extends State<InterfaceTab> {
     final cs = (mq.size.shortestSide / 8).clamp(40.0, 80.0);
     final cols = (mq.size.width / cs).floor();
     final rows = (mq.size.height / cs).floor();
-    context.read<WebSocketService>().setHelloElements(
+    context.read<TransportManager>().setHelloElements(
           layout.elements.map((e) => e.toJson()).toList(),
           gridCols: cols,
           gridRows: rows,
@@ -105,20 +105,20 @@ class _InterfaceTabState extends State<InterfaceTab> {
   }
 
   void _onElementPress(String id) {
-    final ws = context.read<WebSocketService>();
-    if (ws.status != ConnectionStatus.connected) return;
+    final ws = context.read<TransportManager>();
+    if (!ws.isConnected) return;
     ws.sendElementEvent({'type': 'element_event', 'id': id, 'event': 'press'});
   }
 
   void _onElementRelease(String id) {
-    final ws = context.read<WebSocketService>();
-    if (ws.status != ConnectionStatus.connected) return;
+    final ws = context.read<TransportManager>();
+    if (!ws.isConnected) return;
     ws.sendElementEvent({'type': 'element_event', 'id': id, 'event': 'release'});
   }
 
   void _onSliderChange(String id, double value) {
-    final ws = context.read<WebSocketService>();
-    if (ws.status != ConnectionStatus.connected) return;
+    final ws = context.read<TransportManager>();
+    if (!ws.isConnected) return;
     ws.sendElementEvent({
       'type': 'element_event',
       'id': id,
