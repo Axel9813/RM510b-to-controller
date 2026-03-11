@@ -44,6 +44,9 @@ class _MainScreenState extends State<MainScreen> {
         if (transport.isConnected) {
           final state = rcService.state.copyWith(
             picoBitmask: picoService.bitmask,
+            picoExtraBitmask: picoService.extraBitmask,
+            picoAnalogX: picoService.analogX,
+            picoAnalogY: picoService.analogY,
           );
           final json = state.toJson();
           json['gyroPitch'] = gyroService.pitch;

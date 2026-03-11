@@ -37,7 +37,7 @@ HID_BUTTON_FIELDS: frozenset[str] = frozenset({
     "fiveDUp", "fiveDDown", "fiveDLeft", "fiveDRight", "fiveDCenter",
 })
 
-# Button fields provided by the Raspberry Pi Pico (Phase 3)
+# Button fields provided by the Raspberry Pi Pico — core (standard across all RCs)
 PICO_BUTTON_FIELDS: frozenset[str] = frozenset({
     "pico_c1", "pico_c2",
     "pico_shutter_half",   # bit 2 — triggers AF / half-press
@@ -47,7 +47,16 @@ PICO_BUTTON_FIELDS: frozenset[str] = frozenset({
     "pico_circle", "pico_arrow",
 })
 
-BUTTON_FIELDS: frozenset[str] = HID_BUTTON_FIELDS | PICO_BUTTON_FIELDS
+# Pico extra buttons — varies per RC build
+PICO_EXTRA_BUTTON_FIELDS: frozenset[str] = frozenset({
+    "pico_joy_click",
+    "pico_hat_push", "pico_hat_left", "pico_hat_up",
+    "pico_hat_down", "pico_hat_right",
+    "pico_switch2_up", "pico_switch2_down",
+    "pico_red_btn",
+})
+
+BUTTON_FIELDS: frozenset[str] = HID_BUTTON_FIELDS | PICO_BUTTON_FIELDS | PICO_EXTRA_BUTTON_FIELDS
 
 # picoBitmask bit positions → pico field name
 _PICO_BIT_MAP: list[str] = [
@@ -67,10 +76,32 @@ _PICO_BIT_MAP: list[str] = [
 _GYRO_RAD_TO_660 = 660.0 / 0.785
 
 
+# picoExtraBitmask bit positions → pico extra field name
+_PICO_EXTRA_BIT_MAP: list[str] = [
+    "pico_joy_click",    # bit 0
+    "pico_hat_push",     # bit 1
+    "pico_hat_left",     # bit 2
+    "pico_hat_up",       # bit 3
+    "pico_hat_down",     # bit 4
+    "pico_hat_right",    # bit 5
+    "pico_switch2_up",   # bit 6
+    "pico_switch2_down", # bit 7
+    "pico_red_btn",      # bit 8
+]
+
+
 def decode_pico_bitmask(bitmask: int) -> dict[str, bool]:
     """Expand the 16-bit picoBitmask into individual named boolean fields."""
     result: dict[str, bool] = {}
     for bit, name in enumerate(_PICO_BIT_MAP):
+        result[name] = bool(bitmask & (1 << bit))
+    return result
+
+
+def decode_pico_extra_bitmask(bitmask: int) -> dict[str, bool]:
+    """Expand the 16-bit picoExtraBitmask into individual named boolean fields."""
+    result: dict[str, bool] = {}
+    for bit, name in enumerate(_PICO_EXTRA_BIT_MAP):
         result[name] = bool(bitmask & (1 << bit))
     return result
 
@@ -111,10 +142,12 @@ class InputRouter:
         Process one rc_state message.
         Decodes picoBitmask, then dispatches each field per the mapping.
         """
-        # Flatten: merge RC state with decoded pico bits
+        # Flatten: merge RC state with decoded pico bits (core + extras)
         flat = dict(rc_state)
         bitmask = int(rc_state.get("picoBitmask", 0))
         flat.update(decode_pico_bitmask(bitmask))
+        extra_bitmask = int(rc_state.get("picoExtraBitmask", 0))
+        flat.update(decode_pico_extra_bitmask(extra_bitmask))
 
         # Which button (if any) is the gyro activate button
         activate_btn = self._gyro_config.get("activate_button") if self._gyro_config.get("enabled") else None

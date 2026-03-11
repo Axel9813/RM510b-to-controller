@@ -1,15 +1,30 @@
 {
   "pins": {
-    "c1": 21,
-    "c2": 22,
-    "shutter_half": 17,
-    "pause": 4,
-    "rth": 6,
-    "switch_a": 8,
-    "switch_b": 3,
+    "c1": 22,
+    "c2": 10,
+    "shutter_half": 19,
+    "pause": 14,
+    "rth": 17,
+    "switch_a": 15,
+    "switch_b": 16,
     "circle": 20,
-    "arrow": 2,
+    "arrow": 13,
     "shutter_full": 18
+  },
+  "extra_pins": {
+    "joy_click": 0,
+    "hat_push": 1,
+    "hat_left": 2,
+    "hat_up": 3,
+    "hat_down": 4,
+    "hat_right": 5,
+    "switch2_up": 11,
+    "switch2_down": 12,
+    "red_btn": 21
+  },
+  "analog_pins": {
+    "joy_x": 27,
+    "joy_y": 28
   },
   "poll_interval_ms": 5,
   "debounce_ms": 10

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(c:/projects/rc_to_controller/python/server/adb/adb.exe install -r build/app/outputs/flutter-apk/app-debug.apk)",
+      "Bash(python upload_to_pico.py)",
+      "Bash(c:/projects/rc_to_controller/python/server/adb/adb.exe logcat:*)",
+      "Bash(c:/projects/rc_to_controller/python/server/adb/adb.exe shell:*)",
+      "Bash(python upload_to_pico.py config.json)"
+    ]
+  }
+}

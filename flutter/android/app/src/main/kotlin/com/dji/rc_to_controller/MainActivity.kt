@@ -12,6 +12,7 @@ class MainActivity : FlutterActivity() {
         private const val RC_EVENT_CHANNEL  = "com.dji.rc/state"
         private const val PICO_METHOD_CHANNEL = "com.dji.rc/pico"
         private const val PICO_EVENT_CHANNEL  = "com.dji.rc/pico_state"
+        private const val PICO_MONITOR_EVENT_CHANNEL = "com.dji.rc/pico_monitor"
         private const val SENSOR_METHOD_CHANNEL = "com.dji.rc/sensor"
         private const val SENSOR_EVENT_CHANNEL  = "com.dji.rc/sensor_state"
     }
@@ -37,6 +38,7 @@ class MainActivity : FlutterActivity() {
         picoPlugin = pico
         MethodChannel(messenger, PICO_METHOD_CHANNEL).setMethodCallHandler(pico)
         EventChannel(messenger, PICO_EVENT_CHANNEL).setStreamHandler(pico)
+        EventChannel(messenger, PICO_MONITOR_EVENT_CHANNEL).setStreamHandler(pico.monitorStreamHandler)
 
         // IMU Sensor (gyro/accelerometer)
         val sensor = SensorPlugin(this)
@@ -53,6 +55,7 @@ class MainActivity : FlutterActivity() {
         btPlugin = bt
         MethodChannel(messenger, BluetoothPlugin.METHOD_CHANNEL).setMethodCallHandler(bt)
         EventChannel(messenger, BluetoothPlugin.EVENT_CHANNEL).setStreamHandler(bt)
+
     }
 
     override fun onDestroy() {

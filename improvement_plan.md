@@ -91,21 +91,23 @@ Improvements:
    - [ ] Add a "Reconnect" button in the Flutter settings tab for manual retry.
    - [ ] Log each retry attempt with a clear reason (device not found / permission pending / claim failed).
 
-2. Implement extendable configuration for adding more physical input devices (buttons/axes).
+2. ~~DONE (Phase 1)~~ Implement extendable configuration for adding more physical input devices (buttons/axes).
 
-   **Research findings:**
-   - Current input system hardcodes exactly two devices: RC HID (6 axes + 9 buttons) and Pico (10 buttons via bitmask).
-   - `input_router.py` has hardcoded `AXIS_FIELDS`, `HID_BUTTON_FIELDS`, `PICO_BUTTON_FIELDS` frozensets.
-   - Profile configs map field names to actions in a flat dict.
+   **What was done (extra buttons + analog joystick):**
+   - Extended Pico protocol from 3-byte to 9-byte frames: `[0xAA][core_lo][core_hi][extra_lo][extra_hi][joy_x_lo][joy_x_hi][joy_y_lo][joy_y_hi]`.
+   - Core buttons (10) kept separate from extras (9) throughout the entire pipeline. Extras are build-specific — different RC builds can have different extras or none at all.
+   - **Pico firmware** (`python/raspberry/main.py`): Added `EXTRA_BIT_MAP`, `DEFAULT_EXTRA_PINS`, `DEFAULT_ANALOG_PINS`, ADC setup with 4-sample moving average, debouncing for extra buttons. Config-driven pin assignments via `config.json`.
+   - **Kotlin** (`PicoUsbReader.kt`): 9-byte frame parser with ring buffer. `PicoPlugin.kt`: frame callback changed from `Int` to `IntArray[core, extra, joyX, joyY]`.
+   - **Flutter**: `PicoState` extended with `extraBitmask`, `analogX`, `analogY`. `PicoService` parses `List<int>` frames. `RcState` carries `picoExtraBitmask`, `picoAnalogX`, `picoAnalogY` to server.
+   - **Python server** (`input_router.py`): `PICO_EXTRA_BUTTON_FIELDS`, `_PICO_EXTRA_BIT_MAP`, `decode_pico_extra_bitmask()`. Extras included in `BUTTON_FIELDS` for edge detection and action dispatch.
+   - **Frontend**: Extras sidebar in `rc_visualizer.js` (hat switch cluster, analog joystick crosshair, switch 2, red button, joy click). Config editor includes extras with `source: "pico_extra"`.
+   - **PC upload script** (`python/raspberry/upload_to_pico.py`): Pushes firmware files via ADB, restarts app; app auto-detects pending firmware on Pico reader start and uploads via raw REPL.
+   - **Calibration** (`python/raspberry/calibrate.py`): Updated with ADC monitoring at 200ms intervals for joystick tracking.
 
-   **Plan of approach:**
-   - [ ] Create a `DeviceRegistry` in server config (`server.json`) listing all input devices with their type, identifiers, and field definitions.
-   - [ ] Refactor `InputRouter` to dynamically build axis/button field sets from the device registry instead of hardcoded frozensets.
-   - [ ] Create an abstract `InputDevice` base class with `discover()`, `get_fields()`, `decode_state()` methods.
-   - [ ] Implement concrete classes: `HidDevice`, `BitmaskDevice` (Pico), `SerialDevice`, `GenericGamepad`.
-   - [ ] Add a `DeviceManager` that discovers connected devices and manages their lifecycle.
-   - [ ] Update the config editor frontend to show device-aware field selection.
-   - **Estimated scope:** ~300 lines Python.
+   **Remaining (Phase 2 — future):**
+   - [ ] Create abstract `InputDevice` base class for dynamic device registration.
+   - [ ] Refactor `InputRouter` to build field sets from device registry instead of hardcoded frozensets.
+   - [ ] Add analog joystick action mapping (currently raw values passed through, no vJoy/mouse mapping).
 
 3. ~~DONE~~ Capture gyro/accelerometer data and use it as additional input axes.
 
@@ -253,7 +255,14 @@ Improvements:
    - [ ] Show per-device status in the PC frontend (axes in use, active/inactive).
    - **Estimated scope:** ~150 lines Python refactoring.
 
-8. Implement OTA firmware update for Pico from Android (no physical disconnect).
+8. ~~DONE (PC-side)~~ Implement firmware update for Pico (no physical disconnect).
+
+   **What was done:**
+   - PC-side upload via `python/raspberry/upload_to_pico.py`: pushes files to RC via ADB, restarts the Flutter app which auto-detects and uploads firmware via raw REPL (~3 min for 10KB).
+   - `PicoPlugin.uploadPendingFirmware()` runs automatically before reader start — checks app's external files dir for `.py`/`.json` files, uploads each via `PicoUsbReader.uploadFile()`, deletes after success.
+   - Also exposed as `uploadFromStorage` method channel for programmatic triggering.
+
+   **Remaining (in-app UI — future):**
 
    **Context:** The Pico is integrated into the RC and may be difficult to physically disconnect for firmware updates. Two approaches can flash new firmware over the existing USB connection without unplugging.
 
@@ -287,7 +296,7 @@ Improvements:
 
 Known issues (backlog):
 
-- **Pico connected detection flawed:** `app.js` uses `!!picoBitmask` to detect Pico connection. When no Pico buttons are pressed, bitmask is 0, so Pico appears disconnected. Need to add a separate `picoConnected` boolean from Flutter side or check field presence differently.
+- ~~**Pico connected detection flawed** (FIXED):~~ Changed `app.js` from `!!picoBitmask` to `"picoBitmask" in _lastRcState` — field presence check instead of truthy check.
 - **Profile switch loses button/gyro state:** `_rebuild_router()` discards `_prev` state and `_gyro_offset`. Buttons held during profile switch get stuck; gyro offset resets causing a jump. Should carry over `_prev` or explicitly release all buttons/zero all axes on rebuild.
 - **Profile name path traversal:** Profile names from REST API are used unsanitized in file paths. Names like `../../foo` could write outside the profiles directory. Need to validate profile names (alphanumeric + underscore only).
 - **Flutter services not disposed on hot restart:** Services created in `main()` with `ChangeNotifierProvider.value()` are never disposed. Port conflicts on hot restart. Should use `ChangeNotifierProvider(create:)` or add explicit disposal.

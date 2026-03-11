@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -73,6 +75,13 @@ class _SettingsTabState extends State<SettingsTab> {
                 : 'Stopped',
             icon: Icons.cell_tower,
           ),
+
+          const Divider(height: 32),
+
+          // ── Pico controls ────────────────────────────────────────────────
+          Text('Pico', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          _PicoControls(picoService: picoService),
 
           const Divider(height: 32),
 
@@ -275,6 +284,198 @@ class _WebSocketCard extends StatelessWidget {
 }
 
 // ── Helper widgets ───────────────────────────────────────────────────────────
+
+class _PicoControls extends StatefulWidget {
+  final PicoService picoService;
+  const _PicoControls({required this.picoService});
+
+  @override
+  State<_PicoControls> createState() => _PicoControlsState();
+}
+
+class _PicoControlsState extends State<_PicoControls> {
+  bool _busy = false;
+  String? _output;
+  final _scrollController = ScrollController();
+
+  static const _defaultMonitorCode = '''
+from machine import Pin
+import time
+pins={}
+for g in range(0,23):
+ try:
+  pins[g]=Pin(g,Pin.IN)
+ except:
+  pass
+print("READY:"+",".join(str(g) for g in sorted(pins.keys())))
+while True:
+ low=[g for g,p in pins.items() if p.value()==0]
+ print("LOW:"+(",".join(str(g) for g in sorted(low)) if low else "none"))
+ time.sleep_ms(200)
+''';
+
+  /// Load monitor script: prefer /sdcard/pico_monitor.py (pushable via ADB),
+  /// fall back to built-in default.
+  Future<String> _loadMonitorCode() async {
+    try {
+      final f = File('/sdcard/pico_monitor.py');
+      if (await f.exists()) {
+        return await f.readAsString();
+      }
+    } catch (_) {}
+    return _defaultMonitorCode;
+  }
+
+  Future<void> _toggleMonitor() async {
+    final pico = widget.picoService;
+    if (pico.isMonitoring) {
+      setState(() => _busy = true);
+      await pico.stopMonitor();
+      if (mounted) setState(() => _busy = false);
+    } else {
+      setState(() => _busy = true);
+      final code = await _loadMonitorCode();
+      final ok = await pico.startMonitor(code);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          if (!ok) _output = 'Failed to start monitor';
+        });
+      }
+    }
+  }
+
+  Future<void> _listFiles() async {
+    setState(() { _busy = true; _output = 'Listing...'; });
+    final result = await widget.picoService.executeCode(
+      "import os\nprint('Files:', os.listdir('/'))\n",
+      softReboot: false,
+    );
+    if (mounted) setState(() { _busy = false; _output = 'Pico files: $result'; });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pico = widget.picoService;
+    final monitoring = pico.isMonitoring;
+    final lines = pico.monitorLines;
+
+    // Auto-scroll when new lines arrive
+    if (monitoring && lines.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+        }
+      });
+    }
+
+    // Parse last LOW: line for display
+    String? currentLow;
+    for (var i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].startsWith('LOW:')) {
+        currentLow = lines[i].substring(4);
+        break;
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.tonalIcon(
+              onPressed: _busy ? null : _toggleMonitor,
+              icon: Icon(monitoring ? Icons.stop : Icons.tune, size: 18),
+              label: Text(monitoring ? 'Stop Monitor' : 'GPIO Monitor'),
+            ),
+            if (!monitoring)
+              FilledButton.tonalIcon(
+                onPressed: _busy ? null : _listFiles,
+                icon: const Icon(Icons.folder_open, size: 18),
+                label: const Text('List Files'),
+              ),
+          ],
+        ),
+        if (monitoring && currentLow != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Pins LOW (grounded):',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: currentLow == 'none' ? Colors.black26 : Colors.orange.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+              border: currentLow != 'none'
+                  ? Border.all(color: Colors.orange.withValues(alpha: 0.4))
+                  : null,
+            ),
+            child: Text(
+              currentLow == 'none' ? 'No pins grounded' : 'GPIO: $currentLow',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: currentLow == 'none' ? Colors.grey : Colors.orange,
+              ),
+            ),
+          ),
+        ],
+        if (monitoring && lines.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 120,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: ListView.builder(
+                controller: _scrollController,
+                itemCount: lines.length,
+                itemBuilder: (_, i) => Text(
+                  lines[i],
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
+                ),
+              ),
+            ),
+          ),
+        ],
+        if (!monitoring && _output != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.black26,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: SelectableText(
+              _output!,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
 
 class _StatusRow extends StatelessWidget {
   final String label;

@@ -42,6 +42,16 @@ const ConfigEditor = (() => {
     pico_rth: { label: "A (RTH)", source: "pico", type: "button" },
     pico_switch_f: { label: "Switch → F", source: "pico", type: "button" },
     pico_switch_s: { label: "Switch → S", source: "pico", type: "button" },
+    // Pico extra inputs (varies per RC build)
+    pico_joy_click: { label: "Joy Click", source: "pico_extra", type: "button" },
+    pico_hat_push: { label: "Hat Push", source: "pico_extra", type: "button" },
+    pico_hat_up: { label: "Hat Up", source: "pico_extra", type: "button" },
+    pico_hat_down: { label: "Hat Down", source: "pico_extra", type: "button" },
+    pico_hat_left: { label: "Hat Left", source: "pico_extra", type: "button" },
+    pico_hat_right: { label: "Hat Right", source: "pico_extra", type: "button" },
+    pico_switch2_up: { label: "Switch 2 → Up", source: "pico_extra", type: "button" },
+    pico_switch2_down: { label: "Switch 2 → Down", source: "pico_extra", type: "button" },
+    pico_red_btn: { label: "Red Button", source: "pico_extra", type: "button" },
   };
 
   const ACTION_TYPES = [
@@ -300,7 +310,8 @@ const ConfigEditor = (() => {
       const isGyroActivator = inputId === gyroActivateBtn;
       const mapping = _mappings[inputId] || { action: "none" };
       const tr = document.createElement("tr");
-      if (meta.source === "pico") tr.classList.add("pico-row");
+      if (meta.source === "pico" || meta.source === "pico_extra") tr.classList.add("pico-row");
+      if (meta.source === "pico_extra") tr.classList.add("pico-extra-row");
       if (isGyroActivator) tr.classList.add("gyro-locked-row");
       tr.innerHTML = `
         <td><span class="input-label">${meta.label}</span></td>

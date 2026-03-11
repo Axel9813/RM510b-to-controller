@@ -14,6 +14,9 @@ class RcState {
   final bool fiveDRight;
   final bool fiveDCenter;
   final int picoBitmask;
+  final int picoExtraBitmask;
+  final int picoAnalogX;
+  final int picoAnalogY;
 
   const RcState({
     this.seq = 0,
@@ -31,6 +34,9 @@ class RcState {
     this.fiveDRight = false,
     this.fiveDCenter = false,
     this.picoBitmask = 0,
+    this.picoExtraBitmask = 0,
+    this.picoAnalogX = 0,
+    this.picoAnalogY = 0,
   });
 
   factory RcState.fromMap(Map<dynamic, dynamic> map) {
@@ -69,9 +75,17 @@ class RcState {
         'fiveDRight': fiveDRight,
         'fiveDCenter': fiveDCenter,
         'picoBitmask': picoBitmask,
+        'picoExtraBitmask': picoExtraBitmask,
+        'picoAnalogX': picoAnalogX,
+        'picoAnalogY': picoAnalogY,
       };
 
-  RcState copyWith({int? picoBitmask}) {
+  RcState copyWith({
+    int? picoBitmask,
+    int? picoExtraBitmask,
+    int? picoAnalogX,
+    int? picoAnalogY,
+  }) {
     return RcState(
       seq: seq,
       stickLeftH: stickLeftH,
@@ -88,6 +102,9 @@ class RcState {
       fiveDRight: fiveDRight,
       fiveDCenter: fiveDCenter,
       picoBitmask: picoBitmask ?? this.picoBitmask,
+      picoExtraBitmask: picoExtraBitmask ?? this.picoExtraBitmask,
+      picoAnalogX: picoAnalogX ?? this.picoAnalogX,
+      picoAnalogY: picoAnalogY ?? this.picoAnalogY,
     );
   }
 }

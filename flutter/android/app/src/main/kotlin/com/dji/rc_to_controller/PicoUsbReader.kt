@@ -9,20 +9,21 @@ import android.hardware.usb.UsbManager
 import android.util.Log
 
 /**
- * Reads 3-byte bitmask frames from a Raspberry Pi Pico running MicroPython
+ * Reads 9-byte frames from a Raspberry Pi Pico running MicroPython
  * over USB CDC serial.
  *
- * Frame format: [0xAA] [bitmask_low] [bitmask_high]
+ * Frame format: [0xAA] [core_lo] [core_hi] [extra_lo] [extra_hi]
+ *                      [joy_x_lo] [joy_x_hi] [joy_y_lo] [joy_y_hi]
  *
  * Handles two Pico states:
  *   PID 0x0003 — RP2 Boot (BOOTSEL mode): sends PICOBOOT reboot command
  *                to force the Pico into application (MicroPython) mode.
  *   PID 0x0005+ — MicroPython CDC: claims the CDC Data interface (class 0x0A)
- *                 and reads bitmask frames from its bulk IN endpoint.
+ *                 and reads frames from its bulk IN endpoint.
  */
 class PicoUsbReader(
     private val usbManager: UsbManager,
-    private val onBitmask: (Int) -> Unit,
+    private val onFrame: (IntArray) -> Unit,
     private val onError: (String) -> Unit
 ) {
     companion object {
@@ -30,6 +31,7 @@ class PicoUsbReader(
         private const val VID = 0x2E8A          // Raspberry Pi
         private const val PID_BOOTSEL = 0x0003  // RP2 Boot (BOOTSEL mode)
         private const val SYNC_BYTE = 0xAA
+        private const val FRAME_SIZE = 9  // 1 sync + 2 core + 2 extra + 2 joyX + 2 joyY
         private const val READ_TIMEOUT_MS = 100
         private const val DISCONNECT_THRESHOLD = 50 // consecutive -1 reads → treat as disconnected (~5s)
     }
@@ -276,13 +278,24 @@ class PicoUsbReader(
                     ringLen += toCopy
 
                     var i = 0
-                    while (i + 2 < ringLen) {
+                    while (i + FRAME_SIZE - 1 < ringLen) {
                         if ((ring[i].toInt() and 0xFF) == SYNC_BYTE) {
-                            val lo = ring[i + 1].toInt() and 0xFF
-                            val hi = ring[i + 2].toInt() and 0xFF
-                            val bitmask = lo or (hi shl 8)
-                            onBitmask(bitmask)
-                            i += 3
+                            val coreLo = ring[i + 1].toInt() and 0xFF
+                            val coreHi = ring[i + 2].toInt() and 0xFF
+                            val extraLo = ring[i + 3].toInt() and 0xFF
+                            val extraHi = ring[i + 4].toInt() and 0xFF
+                            val joyXLo = ring[i + 5].toInt() and 0xFF
+                            val joyXHi = ring[i + 6].toInt() and 0xFF
+                            val joyYLo = ring[i + 7].toInt() and 0xFF
+                            val joyYHi = ring[i + 8].toInt() and 0xFF
+                            val frame = intArrayOf(
+                                coreLo or (coreHi shl 8),
+                                extraLo or (extraHi shl 8),
+                                joyXLo or (joyXHi shl 8),
+                                joyYLo or (joyYHi shl 8)
+                            )
+                            onFrame(frame)
+                            i += FRAME_SIZE
                         } else {
                             i++
                         }
@@ -311,6 +324,340 @@ class PicoUsbReader(
         }
         connection = null
         usbInterface = null
+    }
+
+    // ── Streaming monitor mode ──────────────────────────────────────────────────
+
+    @Volatile
+    private var monitoring = false
+    private var monitorThread: Thread? = null
+    private var monitorConn: UsbDeviceConnection? = null
+    private var monitorOutEp: UsbEndpoint? = null
+    private var monitorDataIface: UsbInterface? = null
+    private var monitorCtrlIface: UsbInterface? = null
+
+    val isMonitoring: Boolean get() = monitoring
+
+    /**
+     * Enter raw REPL, execute [code], and stream stdout lines to [onLine] in real-time.
+     * Blocks until [stopStreamingExec] is called or the code terminates.
+     * Must be called on a background thread. Reader must be stopped first.
+     */
+    fun startStreamingExec(code: String, onLine: (String) -> Unit): Boolean {
+        if (monitoring) return false
+
+        val device = findDevice() ?: return false
+        if (isBootselMode(device)) return false
+        if (!usbManager.hasPermission(device)) return false
+
+        val dataIface = findCdcDataInterface(device) ?: return false
+        val outEp = findBulkOutEndpoint(dataIface) ?: return false
+        val inEp = findBulkInEndpoint(dataIface) ?: return false
+
+        val conn = usbManager.openDevice(device) ?: return false
+        conn.claimInterface(dataIface, true)
+
+        val ctrlIface = findCdcControlInterface(device)
+        if (ctrlIface != null) {
+            conn.claimInterface(ctrlIface, true)
+            conn.controlTransfer(0x21, 0x22, 0x03, ctrlIface.id, null, 0, 100)
+        }
+
+        monitorConn = conn
+        monitorOutEp = outEp
+        monitorDataIface = dataIface
+        monitorCtrlIface = ctrlIface
+
+        if (!enterRawRepl(conn, outEp, inEp)) {
+            Log.e(TAG, "Monitor: failed to enter raw REPL")
+            conn.releaseInterface(dataIface)
+            ctrlIface?.let { conn.releaseInterface(it) }
+            conn.close()
+            monitorConn = null
+            return false
+        }
+
+        // Send code + Ctrl+D to execute
+        sendBytes(conn, outEp, code.toByteArray())
+        sendBytes(conn, outEp, byteArrayOf(0x04))
+
+        monitoring = true
+        monitorThread = Thread({
+            Log.i(TAG, "Monitor read loop started")
+            val buf = ByteArray(512)
+            val lineBuf = StringBuilder()
+
+            while (monitoring) {
+                val n = conn.bulkTransfer(inEp, buf, buf.size, 200)
+                if (n > 0) {
+                    for (i in 0 until n) {
+                        val c = buf[i].toInt() and 0xFF
+                        if (c == 0x04) {
+                            // End-of-output marker — code finished or was interrupted
+                            monitoring = false
+                            break
+                        }
+                        if (c == '\n'.code) {
+                            val line = lineBuf.toString()
+                            lineBuf.clear()
+                            if (line.isNotEmpty() && line != "OK") {
+                                onLine(line)
+                            }
+                        } else if (c != '\r'.code) {
+                            lineBuf.append(c.toChar())
+                        }
+                    }
+                }
+            }
+            Log.i(TAG, "Monitor read loop ended")
+        }, "PicoMonitor")
+        monitorThread!!.start()
+
+        return true
+    }
+
+    /**
+     * Stop the streaming monitor: interrupt running code, exit raw REPL,
+     * soft-reboot the Pico, and close the USB connection.
+     */
+    fun stopStreamingExec() {
+        if (!monitoring && monitorThread == null) return
+        monitoring = false
+
+        val conn = monitorConn
+        val outEp = monitorOutEp
+        val dataIface = monitorDataIface
+        val ctrlIface = monitorCtrlIface
+
+        // Send Ctrl+C to interrupt running code
+        if (conn != null && outEp != null) {
+            try {
+                sendBytes(conn, outEp, byteArrayOf(0x03, 0x03))
+            } catch (_: Exception) {}
+        }
+
+        monitorThread?.join(2000)
+        monitorThread = null
+
+        // Exit raw REPL and soft-reboot
+        if (conn != null && outEp != null && dataIface != null) {
+            try {
+                val inEp = findBulkInEndpoint(dataIface)
+                if (inEp != null) {
+                    exitRawRepl(conn, outEp, inEp, true)
+                }
+            } catch (_: Exception) {}
+            try {
+                conn.releaseInterface(dataIface)
+                ctrlIface?.let { conn.releaseInterface(it) }
+                conn.close()
+            } catch (_: Exception) {}
+        }
+
+        monitorConn = null
+        monitorOutEp = null
+        monitorDataIface = null
+        monitorCtrlIface = null
+    }
+
+    // ── Raw REPL file upload & code execution ────────────────────────────────
+
+    /**
+     * Upload a file to the Pico's filesystem via raw REPL.
+     *
+     * Protocol (same as mpremote/ampy):
+     *   1. Ctrl+C (interrupt running program)
+     *   2. Ctrl+A (enter raw REPL — no echo, delimited output)
+     *   3. Send Python code to write file
+     *   4. Ctrl+D (execute)
+     *   5. Read response (OK + output + OK, or error)
+     *   6. Ctrl+B (exit raw REPL back to normal REPL)
+     *   7. Ctrl+D (soft-reboot → runs main.py)
+     *
+     * Must be called while the reader is STOPPED.
+     * Returns: result message (success/error)
+     */
+    fun uploadFile(filename: String, content: ByteArray): String {
+        val device = findDevice() ?: return "Pico not found"
+        if (isBootselMode(device)) return "Pico is in BOOTSEL mode"
+        if (!usbManager.hasPermission(device)) return "No USB permission"
+
+        val dataIface = findCdcDataInterface(device) ?: return "No CDC Data interface"
+        val outEp = findBulkOutEndpoint(dataIface) ?: return "No bulk OUT endpoint"
+        val inEp = findBulkInEndpoint(dataIface) ?: return "No bulk IN endpoint"
+
+        val conn = usbManager.openDevice(device) ?: return "Failed to open device"
+        conn.claimInterface(dataIface, true)
+
+        // Claim control interface for DTR/RTS
+        val ctrlIface = findCdcControlInterface(device)
+        if (ctrlIface != null) {
+            conn.claimInterface(ctrlIface, true)
+            conn.controlTransfer(0x21, 0x22, 0x03, ctrlIface.id, null, 0, 100)
+        }
+
+        try {
+            return doRawReplUpload(conn, outEp, inEp, filename, content)
+        } finally {
+            conn.releaseInterface(dataIface)
+            ctrlIface?.let { conn.releaseInterface(it) }
+            conn.close()
+        }
+    }
+
+    /**
+     * Execute Python code on the Pico via raw REPL and return its stdout output.
+     * Must be called while the reader is STOPPED.
+     */
+    fun executeCode(code: String, softReboot: Boolean = true): String {
+        val device = findDevice() ?: return "ERROR: Pico not found"
+        if (isBootselMode(device)) return "ERROR: Pico is in BOOTSEL mode"
+        if (!usbManager.hasPermission(device)) return "ERROR: No USB permission"
+
+        val dataIface = findCdcDataInterface(device) ?: return "ERROR: No CDC Data interface"
+        val outEp = findBulkOutEndpoint(dataIface) ?: return "ERROR: No bulk OUT endpoint"
+        val inEp = findBulkInEndpoint(dataIface) ?: return "ERROR: No bulk IN endpoint"
+
+        val conn = usbManager.openDevice(device) ?: return "ERROR: Failed to open device"
+        conn.claimInterface(dataIface, true)
+
+        val ctrlIface = findCdcControlInterface(device)
+        if (ctrlIface != null) {
+            conn.claimInterface(ctrlIface, true)
+            conn.controlTransfer(0x21, 0x22, 0x03, ctrlIface.id, null, 0, 100)
+        }
+
+        try {
+            return doRawReplExec(conn, outEp, inEp, code, softReboot)
+        } finally {
+            conn.releaseInterface(dataIface)
+            ctrlIface?.let { conn.releaseInterface(it) }
+            conn.close()
+        }
+    }
+
+    private fun sendBytes(conn: UsbDeviceConnection, ep: UsbEndpoint, data: ByteArray) {
+        var offset = 0
+        while (offset < data.size) {
+            val chunk = minOf(data.size - offset, ep.maxPacketSize)
+            val sent = conn.bulkTransfer(ep, data, offset, chunk, 1000)
+            if (sent < 0) break
+            offset += sent
+        }
+    }
+
+    private fun readAll(conn: UsbDeviceConnection, ep: UsbEndpoint, timeoutMs: Int = 2000): String {
+        val sb = StringBuilder()
+        val buf = ByteArray(512)
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val n = conn.bulkTransfer(ep, buf, buf.size, 200)
+            if (n > 0) {
+                sb.append(String(buf, 0, n))
+                // Reset deadline on data received
+                // (but cap at original timeout to avoid infinite loops)
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun drainInput(conn: UsbDeviceConnection, ep: UsbEndpoint) {
+        val buf = ByteArray(512)
+        for (i in 0 until 20) {
+            if (conn.bulkTransfer(ep, buf, buf.size, 50) <= 0) break
+        }
+    }
+
+    private fun enterRawRepl(conn: UsbDeviceConnection, outEp: UsbEndpoint, inEp: UsbEndpoint): Boolean {
+        // Ctrl+C twice to interrupt, then Ctrl+A for raw REPL
+        sendBytes(conn, outEp, byteArrayOf(0x03, 0x03))
+        Thread.sleep(200)
+        drainInput(conn, inEp)
+        sendBytes(conn, outEp, byteArrayOf(0x01))  // Ctrl+A
+        Thread.sleep(200)
+        val response = readAll(conn, inEp, 1000)
+        Log.d(TAG, "Raw REPL entry response: ${response.take(200)}")
+        return response.contains("raw REPL") || response.contains(">")
+    }
+
+    private fun exitRawRepl(conn: UsbDeviceConnection, outEp: UsbEndpoint, inEp: UsbEndpoint, softReboot: Boolean) {
+        sendBytes(conn, outEp, byteArrayOf(0x02))  // Ctrl+B (exit raw REPL)
+        Thread.sleep(100)
+        if (softReboot) {
+            sendBytes(conn, outEp, byteArrayOf(0x04))  // Ctrl+D (soft reboot)
+            Thread.sleep(500)
+        }
+        drainInput(conn, inEp)
+    }
+
+    private fun rawReplExec(conn: UsbDeviceConnection, outEp: UsbEndpoint, inEp: UsbEndpoint,
+                            code: String, readTimeoutMs: Int = 3000): String {
+        // In raw REPL: send code, then Ctrl+D to execute
+        sendBytes(conn, outEp, code.toByteArray())
+        sendBytes(conn, outEp, byteArrayOf(0x04))  // Ctrl+D = execute
+        // Raw REPL response: "OK" + stdout + "\x04" + stderr + "\x04"
+        val response = readAll(conn, inEp, readTimeoutMs)
+        Log.d(TAG, "Raw REPL exec response (${response.length} chars): ${response.take(500)}")
+        return response
+    }
+
+    private fun doRawReplUpload(conn: UsbDeviceConnection, outEp: UsbEndpoint, inEp: UsbEndpoint,
+                                 filename: String, content: ByteArray): String {
+        if (!enterRawRepl(conn, outEp, inEp)) {
+            return "Failed to enter raw REPL"
+        }
+
+        try {
+            // Write file in chunks using base64 to avoid encoding issues
+            val b64 = android.util.Base64.encodeToString(content, android.util.Base64.NO_WRAP)
+            val chunkSize = 256  // base64 chars per chunk
+
+            // Open file
+            val openCode = "import ubinascii\nf=open('$filename','wb')\n"
+            var response = rawReplExec(conn, outEp, inEp, openCode)
+            if (response.contains("Traceback") || response.contains("Error")) {
+                return "Failed to open file: $response"
+            }
+
+            // Write chunks
+            var offset = 0
+            while (offset < b64.length) {
+                val end = minOf(offset + chunkSize, b64.length)
+                val chunk = b64.substring(offset, end)
+                val writeCode = "f.write(ubinascii.a2b_base64('$chunk'))\n"
+                response = rawReplExec(conn, outEp, inEp, writeCode)
+                if (response.contains("Traceback") || response.contains("Error")) {
+                    return "Write failed at offset $offset: $response"
+                }
+                offset = end
+            }
+
+            // Close file
+            response = rawReplExec(conn, outEp, inEp, "f.close()\nprint('OK:${content.size}')\n")
+            Log.i(TAG, "Upload complete: $filename (${content.size} bytes)")
+            return "OK: uploaded $filename (${content.size} bytes)"
+        } finally {
+            exitRawRepl(conn, outEp, inEp, softReboot = true)
+        }
+    }
+
+    private fun doRawReplExec(conn: UsbDeviceConnection, outEp: UsbEndpoint, inEp: UsbEndpoint,
+                               code: String, softReboot: Boolean): String {
+        if (!enterRawRepl(conn, outEp, inEp)) {
+            return "ERROR: Failed to enter raw REPL"
+        }
+
+        try {
+            val response = rawReplExec(conn, outEp, inEp, code, 10000)
+            // Parse raw REPL response: strip "OK" prefix and "\x04" delimiters
+            val cleaned = response
+                .replace("\u0004", "\n")
+                .replace("OK", "")
+                .trim()
+            return cleaned
+        } finally {
+            exitRawRepl(conn, outEp, inEp, softReboot)
+        }
     }
 
     private fun findCdcDataInterface(device: UsbDevice): UsbInterface? {

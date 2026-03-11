@@ -13,6 +13,7 @@ import android.util.Log
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class PicoPlugin(private val context: Context) :
     MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
@@ -20,6 +21,7 @@ class PicoPlugin(private val context: Context) :
     companion object {
         private const val TAG = "PicoPlugin"
         private const val ACTION_USB_PERMISSION = "com.dji.rc_to_controller.PICO_USB_PERMISSION"
+        private const val FIRMWARE_SUBDIR = "pico_firmware"
         private const val BOOTSEL_REBOOT_WAIT_MS = 4000L  // wait for Pico to reboot + re-enumerate
         private const val BOOTSEL_MAX_RETRIES = 5
     }
@@ -29,9 +31,21 @@ class PicoPlugin(private val context: Context) :
     private val startLock = Object()
 
     @Volatile private var reader: PicoUsbReader? = null
+    private var monitorReader: PicoUsbReader? = null
     private var eventSink: EventChannel.EventSink? = null
+    private var monitorEventSink: EventChannel.EventSink? = null
     private var lastError: String? = null
-    private var lastBitmask: Int = -1
+    private var lastFrame: IntArray? = null
+
+    /** StreamHandler for the monitor EventChannel (com.dji.rc/pico_monitor). */
+    val monitorStreamHandler = object : EventChannel.StreamHandler {
+        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+            monitorEventSink = events
+        }
+        override fun onCancel(arguments: Any?) {
+            monitorEventSink = null
+        }
+    }
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -72,27 +86,135 @@ class PicoPlugin(private val context: Context) :
             "status" -> {
                 result.success(getStatus())
             }
+            "uploadFile" -> {
+                val filename = call.argument<String>("filename")
+                val content = call.argument<ByteArray>("content")
+                if (filename == null || content == null) {
+                    result.error("INVALID", "filename and content required", null)
+                    return
+                }
+                Thread {
+                    val wasRunning = reader?.isRunning == true
+                    if (wasRunning) reader?.stop()
+                    val r = PicoUsbReader(usbManager, { _ -> }, {})
+                    val msg = r.uploadFile(filename, content)
+                    if (wasRunning) {
+                        Thread.sleep(2000)  // wait for soft-reboot
+                        handleStartWithBootselRecovery()
+                    }
+                    mainHandler.post { result.success(msg) }
+                }.start()
+            }
+            "executeCode" -> {
+                val code = call.argument<String>("code")
+                val softReboot = call.argument<Boolean>("softReboot") ?: true
+                if (code == null) {
+                    result.error("INVALID", "code is required", null)
+                    return
+                }
+                Thread {
+                    val wasRunning = reader?.isRunning == true
+                    if (wasRunning) reader?.stop()
+                    val r = PicoUsbReader(usbManager, { _ -> }, {})
+                    val output = r.executeCode(code, softReboot)
+                    if (wasRunning && softReboot) {
+                        Thread.sleep(2000)
+                        handleStartWithBootselRecovery()
+                    }
+                    mainHandler.post { result.success(output) }
+                }.start()
+            }
+            "startMonitor" -> {
+                val code = call.argument<String>("code")
+                if (code == null) {
+                    result.error("INVALID", "code is required", null)
+                    return
+                }
+                Thread {
+                    val wasRunning = reader?.isRunning == true
+                    if (wasRunning) reader?.stop()
+                    val r = PicoUsbReader(usbManager, { _ -> }, {})
+                    val ok = r.startStreamingExec(code) { line ->
+                        mainHandler.post { monitorEventSink?.success(line) }
+                    }
+                    if (ok) {
+                        monitorReader = r
+                    } else if (wasRunning) {
+                        // Failed to start monitor — restart reader
+                        Thread.sleep(2000)
+                        handleStartWithBootselRecovery()
+                    }
+                    mainHandler.post { result.success(ok) }
+                }.start()
+            }
+            "stopMonitor" -> {
+                Thread {
+                    monitorReader?.stopStreamingExec()
+                    monitorReader = null
+                    // Soft-reboot done by stopStreamingExec — wait then restart reader
+                    Thread.sleep(2000)
+                    handleStartWithBootselRecovery()
+                    mainHandler.post { result.success(true) }
+                }.start()
+            }
+            "uploadFromStorage" -> {
+                Thread {
+                    val msg = doUploadFromStorage()
+                    mainHandler.post { result.success(msg) }
+                }.start()
+            }
             else -> result.notImplemented()
         }
     }
 
     /**
+     * Upload pending firmware files (if any) without restarting the reader afterward.
+     * Must be called on a background thread. Returns true if files were uploaded.
+     */
+    private fun uploadPendingFirmware(): Boolean {
+        val dir = File(context.getExternalFilesDir(null), FIRMWARE_SUBDIR)
+        Log.d(TAG, "Checking for firmware at: ${dir.absolutePath} exists=${dir.exists()}")
+        if (!dir.isDirectory) return false
+        val files = dir.listFiles()?.filter {
+            it.isFile && (it.name.endsWith(".py") || it.name.endsWith(".json"))
+        } ?: emptyList()
+        if (files.isEmpty()) return false
+
+        Log.i(TAG, "Found ${files.size} pending firmware files — uploading")
+        val wasRunning = reader?.isRunning == true
+        if (wasRunning) reader?.stop()
+
+        val r = PicoUsbReader(usbManager, { _ -> }, {})
+        for (file in files) {
+            Log.i(TAG, "Uploading ${file.name} (${file.length()} bytes)")
+            val msg = r.uploadFile(file.name, file.readBytes())
+            Log.i(TAG, "Upload result: $msg")
+        }
+        for (file in files) file.delete()
+
+        // Wait for soft-reboot
+        Thread.sleep(2000)
+        return true
+    }
+
+    /**
      * Main start logic with BOOTSEL recovery.
-     *
-     * If the Pico is in BOOTSEL mode (PID 0x0003), sends a PICOBOOT reboot
-     * command and waits for it to re-enumerate as MicroPython CDC.
-     * Retries up to BOOTSEL_MAX_RETRIES times.
+     * Uploads any pending firmware files first, then starts the CDC reader.
+     * If the Pico is in BOOTSEL mode, sends a PICOBOOT reboot command and retries.
      */
     private fun handleStartWithBootselRecovery(): Boolean {
         synchronized(startLock) {
         if (reader?.isRunning == true) return true
+
+        // Check for pending firmware files before starting the reader
+        uploadPendingFirmware()
 
         // Stop any previous reader that isn't running (stale from permission flow)
         reader?.stop()
         reader = null
 
         for (attempt in 1..BOOTSEL_MAX_RETRIES) {
-            val tempReader = PicoUsbReader(usbManager, ::onBitmask, ::onReaderError)
+            val tempReader = PicoUsbReader(usbManager, ::onFrame, ::onReaderError)
             val device = tempReader.findDevice()
 
             if (device == null) {
@@ -157,7 +279,7 @@ class PicoPlugin(private val context: Context) :
             lastError = lastError ?: "Failed to start Pico reader"
         } else {
             lastError = null
-            lastBitmask = -1
+            lastFrame = null
         }
         return ok
     }
@@ -165,7 +287,7 @@ class PicoPlugin(private val context: Context) :
     private fun handleStop() {
         reader?.stop()
         reader = null
-        lastBitmask = -1
+        lastFrame = null
     }
 
     private fun requestPermission(device: UsbDevice) {
@@ -174,11 +296,11 @@ class PicoPlugin(private val context: Context) :
         usbManager.requestPermission(device, pi)
     }
 
-    private fun onBitmask(bitmask: Int) {
-        if (bitmask == lastBitmask) return
-        lastBitmask = bitmask
+    private fun onFrame(frame: IntArray) {
+        if (lastFrame != null && frame.contentEquals(lastFrame!!)) return
+        lastFrame = frame.copyOf()
         mainHandler.post {
-            eventSink?.success(bitmask)
+            eventSink?.success(frame.toList())
         }
     }
 
@@ -189,13 +311,13 @@ class PicoPlugin(private val context: Context) :
 
     private fun getStatus(): Map<String, Any?> {
         val r = reader
-        val probe = r ?: PicoUsbReader(usbManager, {}, {})
+        val probe = r ?: PicoUsbReader(usbManager, { _ -> }, {})
         val device = probe.findDevice()
         val info = mutableMapOf<String, Any?>(
             "connected" to (r?.isRunning == true),
             "deviceFound" to (device != null),
             "error" to lastError,
-            "lastBitmask" to lastBitmask
+            "lastBitmask" to (lastFrame?.getOrNull(0) ?: -1)
         )
         if (device != null) {
             info["vid"] = "0x${device.vendorId.toString(16)}"
@@ -215,6 +337,23 @@ class PicoPlugin(private val context: Context) :
 
     override fun onCancel(arguments: Any?) {
         eventSink = null
+    }
+
+    /**
+     * Upload firmware files from /sdcard/pico_firmware/ to the Pico.
+     * Called from broadcast receiver or method channel.
+     * Must be called on a background thread.
+     */
+    private fun doUploadFromStorage(): String {
+        val uploaded = uploadPendingFirmware()
+        if (!uploaded) return "No firmware files found"
+        handleStartWithBootselRecovery()
+        Log.i(TAG, "Firmware upload complete, reader restarted")
+        return "OK"
+    }
+
+    fun uploadFromStorage() {
+        Thread { doUploadFromStorage() }.start()
     }
 
     fun dispose() {

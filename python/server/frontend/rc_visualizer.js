@@ -13,8 +13,9 @@
 
 const RCV = (() => {
   const NS = "http://www.w3.org/2000/svg";
-  const W = 760,
+  const W = 1060,
     H = 520;
+  const RC_W = 760; // RC body width (excluding extras sidebar)
 
   // Layout constants
   const LS = { cx: 158, cy: 260, r: 48 }; // Left  stick
@@ -68,7 +69,7 @@ const RCV = (() => {
       el("rect", {
         x: 22,
         y: 18,
-        width: W - 44,
+        width: RC_W - 44,
         height: H - 34,
         rx: 42,
         fill: "#14142a",
@@ -79,7 +80,7 @@ const RCV = (() => {
     // Grip indents (cosmetic)
     for (const [gx, type] of [
       [22, -1],
-      [W - 22, 1],
+      [RC_W - 22, 1],
     ]) {
       const path =
         type === -1
@@ -400,6 +401,143 @@ const RCV = (() => {
     refs["screen_chips"] = chip_g;
   }
 
+  // ---- Extras sidebar constants & builders -----------------------------------
+
+  const EXTRAS_X = 800; // sidebar left edge
+  const EXT_HAT = { cx: 890, cy: 140, r: 14, off: 28 };
+  const EXT_JOY = { cx: 890, cy: 290, r: 48 };
+  const EXT_SW2 = { cx: 890, cy: 390, trackW: 90, trackH: 20, rx: 10 };
+  const EXT_RED = { cx: 845, cy: 460, r: 16 };
+  const EXT_JCLICK = { cx: 935, cy: 460, r: 16 };
+
+  function buildExtrasSidebar(g) {
+    // Divider line
+    g.appendChild(el("line", {
+      x1: 775, y1: 30, x2: 775, y2: H - 20,
+      stroke: "#2a2a55", "stroke-width": 1, "stroke-dasharray": "4 4",
+    }));
+    // Title
+    g.appendChild(text("EXTRAS", {
+      x: EXTRAS_X + 90, y: 42,
+      "text-anchor": "middle", fill: "#4a4a88",
+      "font-size": 12, "font-family": "monospace",
+    }));
+
+    // ── Hat switch (5-pos cluster) ──
+    g.appendChild(text("HAT SWITCH", {
+      x: EXT_HAT.cx, y: EXT_HAT.cy - EXT_HAT.off - 22,
+      "text-anchor": "middle", fill: "#383868",
+      "font-size": 9, "font-family": "monospace",
+    }));
+    // Center (push)
+    const hc = el("circle", {
+      cx: EXT_HAT.cx, cy: EXT_HAT.cy, r: EXT_HAT.r,
+      fill: "#1e1e3a", stroke: "#2e2e52", "stroke-width": 1.5,
+    });
+    hc.classList.add("rc-pico-dim");
+    g.appendChild(hc);
+    refs["ext_hat_c_btn"] = hc;
+    g.appendChild(text("●", {
+      x: EXT_HAT.cx, y: EXT_HAT.cy + 4,
+      "text-anchor": "middle", fill: "#404070",
+      "font-size": 9, "pointer-events": "none",
+    }));
+    // Cardinal directions
+    const hatDirs = [["u", 0, -1, "▲"], ["d", 0, 1, "▼"], ["l", -1, 0, "◀"], ["r", 1, 0, "▶"]];
+    for (const [dir, dx, dy, arrow] of hatDirs) {
+      const cx = EXT_HAT.cx + dx * EXT_HAT.off;
+      const cy = EXT_HAT.cy + dy * EXT_HAT.off;
+      const btn = el("circle", {
+        cx, cy, r: EXT_HAT.r - 3,
+        fill: "#1e1e3a", stroke: "#2e2e52", "stroke-width": 1.5,
+      });
+      btn.classList.add("rc-pico-dim");
+      g.appendChild(btn);
+      refs[`ext_hat_${dir}_btn`] = btn;
+      g.appendChild(text(arrow, {
+        x: cx, y: cy + 4,
+        "text-anchor": "middle", fill: "#404070",
+        "font-size": 9, "pointer-events": "none",
+      }));
+    }
+
+    // ── Analog joystick ──
+    g.appendChild(text("JOYSTICK", {
+      x: EXT_JOY.cx, y: EXT_JOY.cy - EXT_JOY.r - 8,
+      "text-anchor": "middle", fill: "#383868",
+      "font-size": 9, "font-family": "monospace",
+    }));
+    g.appendChild(el("circle", {
+      cx: EXT_JOY.cx, cy: EXT_JOY.cy, r: EXT_JOY.r,
+      fill: "#0e0e22", stroke: "#2c2c56", "stroke-width": 2,
+    }));
+    g.appendChild(el("circle", {
+      cx: EXT_JOY.cx, cy: EXT_JOY.cy, r: EXT_JOY.r - 4,
+      fill: "none", stroke: "#1e1e40",
+      "stroke-width": 1, "stroke-dasharray": "4 3",
+    }));
+    // Crosshair
+    g.appendChild(el("line", {
+      x1: EXT_JOY.cx - EXT_JOY.r + 6, y1: EXT_JOY.cy,
+      x2: EXT_JOY.cx + EXT_JOY.r - 6, y2: EXT_JOY.cy,
+      stroke: "#1e1e40", "stroke-width": 0.5,
+    }));
+    g.appendChild(el("line", {
+      x1: EXT_JOY.cx, y1: EXT_JOY.cy - EXT_JOY.r + 6,
+      x2: EXT_JOY.cx, y2: EXT_JOY.cy + EXT_JOY.r - 6,
+      stroke: "#1e1e40", "stroke-width": 0.5,
+    }));
+    const jDot = el("circle", {
+      cx: EXT_JOY.cx, cy: EXT_JOY.cy, r: 8,
+      fill: "#4060c0", stroke: "#6080e0", "stroke-width": 1.5,
+    });
+    g.appendChild(jDot);
+    refs["ext_joy_dot"] = jDot;
+    // ADC value readout
+    const jVal = text("X:0 Y:0", {
+      x: EXT_JOY.cx, y: EXT_JOY.cy + EXT_JOY.r + 16,
+      "text-anchor": "middle", fill: "#383868",
+      "font-size": 9, "font-family": "monospace",
+    });
+    g.appendChild(jVal);
+    refs["ext_joy_val"] = jVal;
+
+    // ── Switch 2 (3-pos) ──
+    g.appendChild(text("SWITCH 2", {
+      x: EXT_SW2.cx, y: EXT_SW2.cy - EXT_SW2.trackH - 6,
+      "text-anchor": "middle", fill: "#383868",
+      "font-size": 9, "font-family": "monospace",
+    }));
+    const sw2x = EXT_SW2.cx - EXT_SW2.trackW / 2;
+    g.appendChild(el("rect", {
+      x: sw2x, y: EXT_SW2.cy - EXT_SW2.trackH / 2,
+      width: EXT_SW2.trackW, height: EXT_SW2.trackH,
+      rx: EXT_SW2.rx, fill: "#0d0d22", stroke: "#2a2a55", "stroke-width": 1.5,
+    }));
+    for (const [pos, lbl] of [[-1, "UP"], [0, "N"], [1, "DN"]]) {
+      g.appendChild(text(lbl, {
+        x: EXT_SW2.cx + pos * (EXT_SW2.trackW / 2 - 14),
+        y: EXT_SW2.cy + EXT_SW2.trackH / 2 + 14,
+        "text-anchor": "middle", fill: "#3a3a68", "font-size": 8,
+      }));
+    }
+    const sw2nub = el("circle", {
+      cx: EXT_SW2.cx, cy: EXT_SW2.cy,
+      r: EXT_SW2.trackH / 2 - 2,
+      fill: "#3a5090", stroke: "#5070c0", "stroke-width": 1,
+    });
+    g.appendChild(sw2nub);
+    refs["ext_sw2_nub"] = sw2nub;
+    refs["ext_sw2_cx"] = EXT_SW2.cx;
+    refs["ext_sw2_hw"] = EXT_SW2.trackW / 2 - 10;
+
+    // ── Red button ──
+    buildButton(g, EXT_RED, "ext_red", "RED", true);
+
+    // ── Joy click ──
+    buildButton(g, EXT_JCLICK, "ext_jclick", "JCK", true);
+  }
+
   // ---- Public API -----------------------------------------------------------
 
   function build(container) {
@@ -441,6 +579,11 @@ const RCV = (() => {
 
     // Trigger value bars (drawn on top)
     buildTriggerBars(body);
+
+    // Extras sidebar
+    const extrasG = el("g", { id: "rc-extras" });
+    svg.appendChild(extrasG);
+    buildExtrasSidebar(extrasG);
 
     return svg;
   }
@@ -620,7 +763,11 @@ const RCV = (() => {
 
   function setPicoConnected(connected) {
     _picoConnected = connected;
-    const picoElems = ["arrow", "c1", "c2", "circle", "pause", "rth"];
+    const picoElems = [
+      "arrow", "c1", "c2", "circle", "pause", "rth",
+      "ext_hat_c", "ext_hat_u", "ext_hat_d", "ext_hat_l", "ext_hat_r",
+      "ext_red", "ext_jclick",
+    ];
     for (const id of picoElems) {
       const btn = refs[id + "_btn"];
       if (!btn) continue;
@@ -704,6 +851,47 @@ const RCV = (() => {
     const swF = !!(pico & 0x020); // bit 5
     const swS = !!(pico & 0x040); // bit 6
     setSwitch(swF ? "f" : swS ? "s" : "n");
+
+    // ── Extras (picoExtraBitmask) ──
+    const ext = s.picoExtraBitmask ?? 0;
+
+    // Hat switch: bits 1-5 (push, left, up, down, right)
+    setActive("ext_hat_c", !!(ext & 0x002), true);  // hat_push  bit 1
+    setActive("ext_hat_l", !!(ext & 0x004), true);   // hat_left  bit 2
+    setActive("ext_hat_u", !!(ext & 0x008), true);   // hat_up    bit 3
+    setActive("ext_hat_d", !!(ext & 0x010), true);   // hat_down  bit 4
+    setActive("ext_hat_r", !!(ext & 0x020), true);   // hat_right bit 5
+
+    // Switch 2: bits 6 (up) and 7 (down)
+    const sw2Up = !!(ext & 0x040);
+    const sw2Dn = !!(ext & 0x080);
+    const sw2nub = refs["ext_sw2_nub"];
+    if (sw2nub) {
+      const v = sw2Up ? -1 : sw2Dn ? 1 : 0;
+      sw2nub.setAttribute("cx", refs["ext_sw2_cx"] + v * refs["ext_sw2_hw"]);
+      sw2nub.setAttribute("fill", sw2Up ? "#805010" : sw2Dn ? "#205080" : "#3a5090");
+    }
+
+    // Red button: bit 8
+    setActive("ext_red", !!(ext & 0x100), true);
+
+    // Joy click: bit 0
+    setActive("ext_jclick", !!(ext & 0x001), true);
+
+    // Analog joystick position
+    const ax = s.picoAnalogX ?? 32768;
+    const ay = s.picoAnalogY ?? 32768;
+    const jDot = refs["ext_joy_dot"];
+    if (jDot) {
+      // Normalize 0-65535 → -1..+1 (center ≈ 32768)
+      const nx = Math.max(-1, Math.min(1, (ax - 32768) / 32768));
+      const ny = Math.max(-1, Math.min(1, (ay - 32768) / 32768));
+      const maxOff = EXT_JOY.r - 10;
+      jDot.setAttribute("cx", EXT_JOY.cx + nx * maxOff);
+      jDot.setAttribute("cy", EXT_JOY.cy + ny * maxOff);
+    }
+    const jVal = refs["ext_joy_val"];
+    if (jVal) jVal.textContent = `X:${ax} Y:${ay}`;
   }
 
   // ---- Gyro readout display (bar gauges) ------------------------------------

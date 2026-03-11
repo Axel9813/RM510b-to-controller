@@ -201,8 +201,8 @@
         if (msg.registry) ConfigEditor.loadRegistry(msg.registry, msg.grid_cols, msg.grid_rows);
         if (msg.rc_state) {
           _lastRcState = msg.rc_state;
-          // Pico connected = picoBitmask is present and non-zero
-          _picoConnected = !!_lastRcState.picoBitmask;
+          // Pico connected = picoBitmask field exists in rc_state (may be 0 when no buttons pressed)
+          _picoConnected = "picoBitmask" in _lastRcState;
           RCV.update(_lastRcState, _picoConnected);
           RCV.updateGyroReadout(_lastRcState);
         }
@@ -214,8 +214,8 @@
         if (msg.vjoy_active !== undefined) setVJoyStatus(msg.vjoy_active, msg.vjoy_error);
         if (msg.rc_state) {
           _lastRcState = msg.rc_state;
-          // Pico connected = picoBitmask is present and non-zero
-          _picoConnected = !!_lastRcState.picoBitmask;
+          // Pico connected = picoBitmask field exists in rc_state (may be 0 when no buttons pressed)
+          _picoConnected = "picoBitmask" in _lastRcState;
           RCV.update(_lastRcState, _picoConnected);
           RCV.updateGyroReadout(_lastRcState);
         }

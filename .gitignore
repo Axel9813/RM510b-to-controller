@@ -1,4 +1,4 @@
-python/server/__pycache__/
+**/__pycache__/
 *.log
 
 # Runtime config — auto-created by config_manager.py on first run

@@ -52,7 +52,7 @@ body {
 
 /* ---- App shell ---- */
 .app-shell {
-  max-width: 980px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 0 0 48px;
 }
@@ -165,7 +165,6 @@ body {
 }
 #rc-visualizer-container svg {
   width: 100%;
-  max-width: 740px;
   height: auto;
 }
 .pico-notice {
