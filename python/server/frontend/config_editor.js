@@ -4,11 +4,15 @@
  * Reads config from server via REST API.
  * Writes via REST API (PATCH /api/config/mappings, PATCH /api/config/elements, etc.)
  * Uses the shared Modal system exposed on window.Modal.
+ *
+ * Pico extra inputs (buttons + axes specific to this RC build) are loaded
+ * dynamically from pico_hardware.json via /api/status — no hardcoded entries.
  */
 
 const ConfigEditor = (() => {
   // ---- Constants ------------------------------------------------------------
 
+  // Fixed inputs — standard across all RC builds
   const INPUT_LABELS = {
     // HID inputs (available via USB HID from the RC itself)
     stickLeftH: { label: "L-Stick H", source: "hid", type: "axis" },
@@ -23,7 +27,7 @@ const ConfigEditor = (() => {
     fiveDLeft: { label: "5D Left", source: "hid", type: "button" },
     fiveDRight: { label: "5D Right", source: "hid", type: "button" },
     fiveDCenter: { label: "5D Press", source: "hid", type: "button" },
-    // Pico inputs (available once Raspberry Pi Pico is connected)
+    // Pico core inputs (standard across all RCs with a Pico)
     pico_shutter_half: {
       label: "Shutter ½ (Pico)",
       source: "pico",
@@ -42,16 +46,6 @@ const ConfigEditor = (() => {
     pico_rth: { label: "A (RTH)", source: "pico", type: "button" },
     pico_switch_f: { label: "Switch → F", source: "pico", type: "button" },
     pico_switch_s: { label: "Switch → S", source: "pico", type: "button" },
-    // Pico extra inputs (varies per RC build)
-    pico_joy_click: { label: "Joy Click", source: "pico_extra", type: "button" },
-    pico_hat_push: { label: "Hat Push", source: "pico_extra", type: "button" },
-    pico_hat_up: { label: "Hat Up", source: "pico_extra", type: "button" },
-    pico_hat_down: { label: "Hat Down", source: "pico_extra", type: "button" },
-    pico_hat_left: { label: "Hat Left", source: "pico_extra", type: "button" },
-    pico_hat_right: { label: "Hat Right", source: "pico_extra", type: "button" },
-    pico_switch2_up: { label: "Switch 2 → Up", source: "pico_extra", type: "button" },
-    pico_switch2_down: { label: "Switch 2 → Down", source: "pico_extra", type: "button" },
-    pico_red_btn: { label: "Red Button", source: "pico_extra", type: "button" },
   };
 
   const ACTION_TYPES = [
@@ -60,6 +54,7 @@ const ConfigEditor = (() => {
     { value: "vjoy_button", label: "vJoy Button" },
     { value: "key", label: "Key Combo" },
     { value: "system", label: "System Action" },
+    { value: "mouse_move", label: "Mouse Movement" },
   ];
 
   const VJOY_AXES = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Sl0", "Sl1"];
@@ -89,6 +84,51 @@ const ConfigEditor = (() => {
     roll:  { action: "none", vjoy_axis: "SL1", mouse_axis: "x", sensitivity: 1.0, invert: false },
     yaw:   { action: "none", vjoy_axis: "RZ",  mouse_axis: "x", sensitivity: 1.0, invert: false },
   };
+
+  // Dynamic pico extra inputs — loaded from server's pico_hardware.json
+  let _picoHardware = { extra_buttons: [], extra_axes: [] };
+
+  // ---- Dynamic input helpers ------------------------------------------------
+
+  /**
+   * Build input label definitions from pico_hardware config.
+   * Returns {inputId: {label, source, type}} for extra buttons + axes.
+   */
+  function getExtraInputLabels() {
+    const labels = {};
+    for (const btn of _picoHardware.extra_buttons || []) {
+      labels[`pico_${btn.id}`] = {
+        label: btn.label,
+        source: "pico_extra",
+        type: "button",
+      };
+    }
+    for (const axis of _picoHardware.extra_axes || []) {
+      labels[`pico_${axis.id}`] = {
+        label: axis.label,
+        source: "pico_extra",
+        type: "axis",
+      };
+    }
+    return labels;
+  }
+
+  /**
+   * Get input metadata by id — checks fixed labels first, then dynamic extras.
+   */
+  function getInputMeta(inputId) {
+    if (INPUT_LABELS[inputId]) return INPUT_LABELS[inputId];
+    const extras = getExtraInputLabels();
+    if (extras[inputId]) return extras[inputId];
+    return { label: inputId, source: "unknown", type: "button" };
+  }
+
+  /**
+   * Get all input labels (fixed + dynamic) — for gyro activate button dropdown etc.
+   */
+  function getAllInputLabels() {
+    return { ...INPUT_LABELS, ...getExtraInputLabels() };
+  }
 
   // ---- REST helpers ---------------------------------------------------------
 
@@ -133,6 +173,10 @@ const ConfigEditor = (() => {
       if (status.grid_cols) _gridCols = status.grid_cols;
       if (status.grid_rows) _gridRows = status.grid_rows;
       if (status.gyro_config) _gyroConfig = status.gyro_config;
+      if (status.pico_hardware) {
+        _picoHardware = status.pico_hardware;
+        RCV.setPicoHardware(_picoHardware);
+      }
       renderAll();
     } catch (e) {
       window.App?.toast("Failed to load config: " + e.message, "error");
@@ -142,6 +186,7 @@ const ConfigEditor = (() => {
   function renderAll() {
     renderProfiles();
     renderMappings();
+    renderExtras();
     renderElements();
     renderGyroConfig();
     _syncScreenElements();
@@ -278,14 +323,7 @@ const ConfigEditor = (() => {
       });
   }
 
-  // ---- Input Mappings section -----------------------------------------------
-
-  // Server stores mappings as: {action: "vjoy_axis", axis: "X", invert: false}
-  //                             {action: "vjoy_button", button: 1}
-  //                             {action: "key", keys: [...]}
-  //                             {action: "system", fn: "media_play_pause"}
-  //                             {action: "none"}
-  // The UI reads/writes these directly — no translation needed.
+  // ---- Input Mappings — shared helpers --------------------------------------
 
   function actionBadgeHtml(mapping) {
     const act = mapping?.action || "none";
@@ -296,26 +334,34 @@ const ConfigEditor = (() => {
     if (act === "vjoy_button") detail = `btn ${mapping.button || "?"}`;
     if (act === "key") detail = (mapping.keys || []).join("+");
     if (act === "system") detail = mapping.fn || "?";
+    if (act === "mouse_move")
+      detail = `mouse ${mapping.mouse_axis || "?"} ${mapping.invert ? "(inv)" : ""}`;
     return `<span class="action-badge ${act}">${detail || act.replace("_", " ")}</span>`;
   }
 
-  function renderMappings() {
-    const tbody = document.getElementById("mapping-tbody");
+  /**
+   * Generic mapping table renderer — used for both standard and extras sections.
+   * @param {string} tbodyId — DOM id of the tbody element
+   * @param {Object} inputLabels — {inputId: {label, source, type}}
+   * @param {Object} options — {showSource: bool}
+   */
+  function renderMappingTable(tbodyId, inputLabels, options = {}) {
+    const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
     tbody.innerHTML = "";
+    const showSource = options.showSource !== false;
 
     const gyroActivateBtn = _gyroConfig.enabled ? _gyroConfig.activate_button : null;
 
-    for (const [inputId, meta] of Object.entries(INPUT_LABELS)) {
+    for (const [inputId, meta] of Object.entries(inputLabels)) {
       const isGyroActivator = inputId === gyroActivateBtn;
       const mapping = _mappings[inputId] || { action: "none" };
       const tr = document.createElement("tr");
       if (meta.source === "pico" || meta.source === "pico_extra") tr.classList.add("pico-row");
-      if (meta.source === "pico_extra") tr.classList.add("pico-extra-row");
       if (isGyroActivator) tr.classList.add("gyro-locked-row");
       tr.innerHTML = `
         <td><span class="input-label">${meta.label}</span></td>
-        <td><span class="source-badge ${meta.source}">${meta.source.toUpperCase()}</span></td>
+        ${showSource ? `<td><span class="source-badge ${meta.source}">${meta.source.toUpperCase()}</span></td>` : ""}
         <td><span style="color:var(--text-dim);font-size:11px">${meta.type}</span></td>
         <td>${isGyroActivator
           ? '<span class="action-badge gyro">GYRO ACTIVATE</span>'
@@ -330,21 +376,79 @@ const ConfigEditor = (() => {
     tbody.querySelectorAll(".edit-mapping-btn").forEach((btn) => {
       btn.addEventListener("click", () => openMappingEditor(btn.dataset.id));
     });
+  }
+
+  // ---- Standard Input Mappings section (HID + Pico Core) --------------------
+
+  function renderMappings() {
+    renderMappingTable("mapping-tbody", INPUT_LABELS, { showSource: true });
 
     const saveBtn = document.getElementById("btn-save-mappings");
     if (saveBtn && !saveBtn._hasListener) {
-      saveBtn.addEventListener("click", saveAllMappings);
+      saveBtn.addEventListener("click", () => saveMappingsForInputs(INPUT_LABELS));
       saveBtn._hasListener = true;
     }
   }
 
+  // ---- Pico Extra Inputs section (dynamic) ----------------------------------
+
+  function renderExtras() {
+    const extraLabels = getExtraInputLabels();
+    const keys = Object.keys(extraLabels);
+    const section = document.getElementById("section-pico-extras");
+    const emptyHint = document.getElementById("extras-empty");
+    const table = document.getElementById("extras-table");
+
+    if (!section) return;
+
+    if (keys.length === 0) {
+      section.style.display = "none";
+      return;
+    }
+    section.style.display = "";
+    if (emptyHint) emptyHint.style.display = "none";
+    if (table) table.style.display = "";
+
+    renderMappingTable("extras-tbody", extraLabels, { showSource: false });
+
+    const saveBtn = document.getElementById("btn-save-extras");
+    if (saveBtn && !saveBtn._hasListener) {
+      saveBtn.addEventListener("click", () => saveMappingsForInputs(extraLabels));
+      saveBtn._hasListener = true;
+    }
+  }
+
+  /**
+   * Save only the mappings for the given input labels subset (via PATCH merge).
+   */
+  async function saveMappingsForInputs(inputLabels) {
+    const subset = {};
+    for (const inputId of Object.keys(inputLabels)) {
+      subset[inputId] = _mappings[inputId] || { action: "none" };
+    }
+    try {
+      await apiPatch("/api/config/mappings", subset);
+      window.App?.toast("Mappings saved", "success");
+    } catch (e) {
+      window.App?.toast(e.message, "error");
+    }
+  }
+
+  // ---- Mapping editor modal -------------------------------------------------
+
   function buildActionForm(inputId, currentMapping) {
-    const meta = INPUT_LABELS[inputId];
+    const meta = getInputMeta(inputId);
     const isAxis = meta?.type === "axis";
     const curAct = currentMapping?.action || "none";
 
     let typeOptions = ACTION_TYPES.filter((t) => {
+      // vjoy_axis and mouse_move only for axis inputs
       if (!isAxis && t.value === "vjoy_axis") return false;
+      if (!isAxis && t.value === "mouse_move") return false;
+      // vjoy_button, key, system only for button inputs
+      if (isAxis && t.value === "vjoy_button") return false;
+      if (isAxis && t.value === "key") return false;
+      if (isAxis && t.value === "system") return false;
       return true;
     })
       .map(
@@ -387,6 +491,27 @@ const ConfigEditor = (() => {
           <input type="number" id="af-dz" min="0" max="0.5" step="0.01" value="${currentMapping?.dead_zone ?? 0.02}" />
         </div>
       `;
+    } else if (actionType === "mouse_move") {
+      container.innerHTML = `
+        <div class="form-row">
+          <label>Mouse Axis</label>
+          <select id="af-mouse-axis">
+            <option value="x"${(currentMapping?.mouse_axis ?? "x") === "x" ? " selected" : ""}>X (horizontal)</option>
+            <option value="y"${(currentMapping?.mouse_axis ?? "x") === "y" ? " selected" : ""}>Y (vertical)</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Sensitivity (px/frame at full deflection)</label>
+          <input type="number" id="af-mouse-sens" min="0.1" max="50" step="0.1" value="${currentMapping?.sensitivity ?? 5.0}" />
+        </div>
+        <div class="form-row">
+          <label><input type="checkbox" id="af-invert" ${currentMapping?.invert ? "checked" : ""} /> Invert</label>
+        </div>
+        <div class="form-row">
+          <label>Dead zone (0–1)</label>
+          <input type="number" id="af-dz" min="0" max="0.5" step="0.01" value="${currentMapping?.dead_zone ?? 0.05}" />
+        </div>
+      `;
     } else if (actionType === "vjoy_button") {
       container.innerHTML = `
         <div class="form-row">
@@ -412,8 +537,6 @@ const ConfigEditor = (() => {
     }
   }
 
-  // Build a server-format mapping object from the current form state.
-  // Server format: {action: "...", ...action-specific fields}
   function collectMappingFromForm(actionType) {
     if (actionType === "none") return { action: "none" };
     if (actionType === "vjoy_axis")
@@ -423,6 +546,18 @@ const ConfigEditor = (() => {
         invert: document.getElementById("af-invert")?.checked ?? false,
         dead_zone: parseFloat(
           document.getElementById("af-dz")?.value ?? "0.02",
+        ),
+      };
+    if (actionType === "mouse_move")
+      return {
+        action: "mouse_move",
+        mouse_axis: document.getElementById("af-mouse-axis")?.value || "x",
+        sensitivity: parseFloat(
+          document.getElementById("af-mouse-sens")?.value ?? "5.0",
+        ),
+        invert: document.getElementById("af-invert")?.checked ?? false,
+        dead_zone: parseFloat(
+          document.getElementById("af-dz")?.value ?? "0.05",
         ),
       };
     if (actionType === "vjoy_button")
@@ -448,8 +583,9 @@ const ConfigEditor = (() => {
 
   function openMappingEditor(inputId) {
     const currentMapping = _mappings[inputId] || { action: "none" };
+    const meta = getInputMeta(inputId);
     window.Modal?.show(
-      `Map: ${INPUT_LABELS[inputId]?.label || inputId}`,
+      `Map: ${meta.label || inputId}`,
       buildActionForm(inputId, currentMapping),
       async () => {
         const actionType =
@@ -457,6 +593,7 @@ const ConfigEditor = (() => {
         const newMapping = collectMappingFromForm(actionType);
         _mappings[inputId] = newMapping;
         renderMappings();
+        renderExtras();
         try {
           await apiPatch("/api/config/mappings", { [inputId]: newMapping });
           window.App?.toast("Mapping saved", "success");
@@ -473,15 +610,6 @@ const ConfigEditor = (() => {
         });
       renderActionFields(currentMapping.action || "none", currentMapping);
     }, 50);
-  }
-
-  async function saveAllMappings() {
-    try {
-      await apiPatch("/api/config/mappings", _mappings);
-      window.App?.toast("All mappings saved", "success");
-    } catch (e) {
-      window.App?.toast(e.message, "error");
-    }
   }
 
   // ---- Element registry section ---------------------------------------------
@@ -669,7 +797,8 @@ const ConfigEditor = (() => {
     if (!container) return;
 
     const g = _gyroConfig;
-    const buttonOptions = Object.entries(INPUT_LABELS)
+    const allLabels = getAllInputLabels();
+    const buttonOptions = Object.entries(allLabels)
       .filter(([, m]) => m.type === "button")
       .map(([id, m]) => `<option value="${id}"${g.activate_button === id ? " selected" : ""}>${m.label}</option>`)
       .join("");
@@ -776,6 +905,7 @@ const ConfigEditor = (() => {
       const result = await apiPatch("/api/config/gyro", cfg);
       _gyroConfig = result.gyro_config || cfg;
       renderMappings(); // refresh locked button state
+      renderExtras();
       window.App?.toast("Gyro config saved", "success");
     } catch (e) {
       window.App?.toast(e.message, "error");

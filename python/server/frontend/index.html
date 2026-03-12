@@ -79,7 +79,7 @@
           </div>
         </section>
 
-        <!-- Input Mappings -->
+        <!-- Input Mappings (HID + Pico Core) -->
         <section class="config-section" id="section-mappings">
           <div class="section-header" data-toggle="mappings-body">
             <span>&#x25B6; Input → Action Mappings</span>
@@ -89,8 +89,7 @@
           </div>
           <div class="section-body" id="mappings-body">
             <p class="hint">
-              HID inputs (available now) shown normally. Pico inputs shown
-              dimmed — will activate when Pico connects.
+              HID (USB) and Pico core inputs — standard across all RC builds.
             </p>
             <table class="mapping-table" id="mapping-table">
               <thead>
@@ -103,6 +102,37 @@
                 </tr>
               </thead>
               <tbody id="mapping-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Pico Extra Inputs (dynamic, per-RC build) -->
+        <section class="config-section" id="section-pico-extras">
+          <div class="section-header" data-toggle="pico-extras-body">
+            <span>&#x25B6; Pico Extra Inputs</span>
+            <button class="btn btn-primary btn-sm" id="btn-save-extras">
+              Save All
+            </button>
+          </div>
+          <div class="section-body" id="pico-extras-body">
+            <p class="hint">
+              Custom buttons and axes for this RC build.
+              Defined in <code>pico_hardware.json</code> — edit when changing hardware.
+            </p>
+            <p class="empty-hint" id="extras-empty" style="display:none">
+              No extra inputs configured. Add buttons or axes to
+              <code>config/pico_hardware.json</code> on the server.
+            </p>
+            <table class="mapping-table" id="extras-table" style="display:none">
+              <thead>
+                <tr>
+                  <th>Input</th>
+                  <th>Type</th>
+                  <th>Action</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="extras-tbody"></tbody>
             </table>
           </div>
         </section>

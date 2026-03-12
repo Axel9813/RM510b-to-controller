@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 BASE_DIR = Path(__file__).parent
 CONFIG_DIR = BASE_DIR / "config"
 PROFILES_DIR = CONFIG_DIR / "profiles"
+PICO_HW_PATH = CONFIG_DIR / "pico_hardware.json"
 
 # ---------------------------------------------------------------------------
 # Default content helpers
@@ -96,6 +97,7 @@ class ConfigManager:
         self._server: dict[str, Any] = {}
         self._profile: dict[str, Any] = {}
         self._profile_name: str = "default"
+        self._pico_hw: dict[str, Any] = {"extra_buttons": [], "extra_axes": []}
         self._on_profile_changed: list[Callable[[], None]] = []
 
     # ------------------------------------------------------------------
@@ -116,9 +118,10 @@ class ConfigManager:
             _write_json(default_profile, DEFAULT_PROFILE)
 
     def load(self) -> None:
-        """Load server config and the active profile from disk."""
+        """Load server config, pico hardware definition, and the active profile from disk."""
         self.ensure_defaults()
         self._server = _read_json(CONFIG_DIR / "server.json")
+        self._pico_hw = self._load_pico_hardware()
         self._profile_name = self._server.get("active_profile", "default")
         self._profile = self._load_profile_raw(self._profile_name)
 
@@ -247,6 +250,10 @@ class ConfigManager:
     # Callbacks
     # ------------------------------------------------------------------
 
+    def pico_hardware(self) -> dict[str, Any]:
+        """Return pico hardware definition (extra buttons + axes)."""
+        return self._pico_hw
+
     def on_profile_changed(self, cb: Callable[[], None]) -> None:
         """Register a callback to be called after a profile switch."""
         self._on_profile_changed.append(cb)
@@ -254,6 +261,12 @@ class ConfigManager:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _load_pico_hardware(self) -> dict[str, Any]:
+        """Load pico_hardware.json or return empty defaults."""
+        if PICO_HW_PATH.exists():
+            return _read_json(PICO_HW_PATH)
+        return {"extra_buttons": [], "extra_axes": []}
 
     def _load_profile_raw(self, name: str) -> dict[str, Any]:
         path = PROFILES_DIR / f"{name}.json"

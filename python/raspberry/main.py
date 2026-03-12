@@ -213,11 +213,6 @@ def main():
     last_send_time = 0    # ticks_ms of last send
     led_toggle_time = 0   # slow blink while running
 
-    # ADC smoothing: 4-sample moving average
-    ax_buf = [0] * 4
-    ay_buf = [0] * 4
-    adc_idx = 0
-
     while True:
         now = time.ticks_ms()
         core_bitmask = 0
@@ -238,19 +233,16 @@ def main():
             if debounced:
                 extra_bitmask |= (1 << EXTRA_BIT_MAP[name])
 
-        # Read analog with smoothing
+        # Read analog (hardware capacitors handle noise filtering)
         analog_x = 0
         analog_y = 0
         if adcs:
             for aname, adc in adcs:
                 val = adc.read_u16()
                 if aname == "joy_x":
-                    ax_buf[adc_idx % 4] = val
-                    analog_x = sum(ax_buf) // 4
+                    analog_x = val
                 elif aname == "joy_y":
-                    ay_buf[adc_idx % 4] = val
-                    analog_y = sum(ay_buf) // 4
-            adc_idx += 1
+                    analog_y = val
 
         # Detect changes
         digital_changed = (core_bitmask != last_core or

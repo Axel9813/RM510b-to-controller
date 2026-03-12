@@ -113,6 +113,7 @@ def _rebuild_router() -> None:
     input_router = InputRouter(
         cfg.input_mappings(), vjoy, sys_actions,
         gyro_config=cfg.gyro_config(),
+        pico_hardware=cfg.pico_hardware(),
     )
     log.info("InputRouter rebuilt from profile '%s'.", cfg.active_profile_name())
 
@@ -283,6 +284,7 @@ async def api_status() -> JSONResponse:
         "profiles": cfg.list_profiles(),
         "mappings": cfg.input_mappings(),
         "gyro_config": cfg.gyro_config(),
+        "pico_hardware": cfg.pico_hardware(),
         "elements": output_mgr.get_registry() if output_mgr else {},
         "grid_cols": grid_cols,
         "grid_rows": grid_rows,
@@ -367,9 +369,19 @@ async def api_get_mappings() -> JSONResponse:
     return JSONResponse(cfg.input_mappings())
 
 
-@app.post("/api/config/mappings")
 @app.patch("/api/config/mappings")
+async def api_patch_mappings(body: dict[str, Any]) -> JSONResponse:
+    """Merge mapping updates into the current mappings."""
+    current = cfg.input_mappings()
+    current.update(body)
+    cfg.set_input_mappings(current)
+    input_router.reload(current)
+    return JSONResponse({"status": "saved"})
+
+
+@app.post("/api/config/mappings")
 async def api_set_mappings(body: dict[str, Any]) -> JSONResponse:
+    """Full replace of all mappings."""
     cfg.set_input_mappings(body)
     input_router.reload(body)
     return JSONResponse({"status": "saved"})

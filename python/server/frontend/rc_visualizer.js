@@ -17,6 +17,19 @@ const RCV = (() => {
     H = 520;
   const RC_W = 760; // RC body width (excluding extras sidebar)
 
+  // Joystick calibration (updated via setPicoHardware)
+  let _calX = { min: 0, center: 32768, max: 65535 };
+  let _calY = { min: 0, center: 32768, max: 65535 };
+
+  function _calNormalize(raw, cal) {
+    if (raw < cal.center) {
+      const span = cal.center - cal.min;
+      return span > 0 ? Math.max(-1, (raw - cal.center) / span) : 0;
+    }
+    const span = cal.max - cal.center;
+    return span > 0 ? Math.min(1, (raw - cal.center) / span) : 0;
+  }
+
   // Layout constants
   const LS = { cx: 158, cy: 260, r: 48 }; // Left  stick
   const RS = { cx: 602, cy: 260, r: 48 }; // Right stick
@@ -878,14 +891,13 @@ const RCV = (() => {
     // Joy click: bit 0
     setActive("ext_jclick", !!(ext & 0x001), true);
 
-    // Analog joystick position
+    // Analog joystick position (uses calibration if available)
     const ax = s.picoAnalogX ?? 32768;
     const ay = s.picoAnalogY ?? 32768;
     const jDot = refs["ext_joy_dot"];
     if (jDot) {
-      // Normalize 0-65535 → -1..+1 (center ≈ 32768)
-      const nx = Math.max(-1, Math.min(1, (ax - 32768) / 32768));
-      const ny = Math.max(-1, Math.min(1, (ay - 32768) / 32768));
+      const nx = _calNormalize(ax, _calX);
+      const ny = _calNormalize(ay, _calY);
       const maxOff = EXT_JOY.r - 10;
       jDot.setAttribute("cx", EXT_JOY.cx + nx * maxOff);
       jDot.setAttribute("cy", EXT_JOY.cy + ny * maxOff);
@@ -977,5 +989,18 @@ const RCV = (() => {
     }
   }
 
-  return { build, update, setScreenElements, updateGyroReadout };
+  function setPicoHardware(hw) {
+    if (!hw || !hw.extra_axes) return;
+    for (const axis of hw.extra_axes) {
+      const cal = {
+        min: axis.cal_min ?? 0,
+        center: axis.cal_center ?? 32768,
+        max: axis.cal_max ?? 65535,
+      };
+      if (axis.source_field === "picoAnalogX" || axis.id === "joy_x") _calX = cal;
+      if (axis.source_field === "picoAnalogY" || axis.id === "joy_y") _calY = cal;
+    }
+  }
+
+  return { build, update, setScreenElements, updateGyroReadout, setPicoHardware };
 })();

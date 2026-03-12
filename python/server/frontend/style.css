@@ -278,6 +278,10 @@ body {
   background: #3a2a10;
   color: #ffaa44;
 }
+.action-badge.mouse_move {
+  background: #2a3a1a;
+  color: #90cc60;
+}
 .gyro-locked-row td {
   opacity: 0.5;
 }

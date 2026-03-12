@@ -5,7 +5,10 @@
       "Bash(python upload_to_pico.py)",
       "Bash(c:/projects/rc_to_controller/python/server/adb/adb.exe logcat:*)",
       "Bash(c:/projects/rc_to_controller/python/server/adb/adb.exe shell:*)",
-      "Bash(python upload_to_pico.py config.json)"
+      "Bash(python upload_to_pico.py config.json)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''input_router.py''\\).read\\(\\)\\); print\\(''input_router.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''config_manager.py''\\).read\\(\\)\\); print\\(''config_manager.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''server.py''\\).read\\(\\)\\); print\\(''server.py OK''\\)\")"
     ]
   }
 }
