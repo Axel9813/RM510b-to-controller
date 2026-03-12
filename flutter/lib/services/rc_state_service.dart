@@ -25,13 +25,32 @@ class RcStateService extends ChangeNotifier {
   Future<bool> start() async {
     try {
       final result = await _methodChannel.invokeMethod<bool>('start');
+      _listenEvents();
       if (result == true) {
         _connected = true;
         _error = null;
-        _listenEvents();
+      }
+      notifyListeners();
+      return result == true;
+    } on PlatformException catch (e) {
+      _error = e.message;
+      _connected = false;
+      _listenEvents(); // listen anyway — Kotlin retry/attach may connect later
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Force a full reconnect cycle (stop + fresh start with retries).
+  Future<bool> reconnect() async {
+    try {
+      final result = await _methodChannel.invokeMethod<bool>('reconnect');
+      _listenEvents();
+      if (result == true) {
+        _connected = true;
+        _error = null;
       } else {
-        // Permission may have been requested; listen anyway for when it comes through
-        _listenEvents();
+        _error = 'Reconnecting...';
       }
       notifyListeners();
       return result == true;
@@ -70,14 +89,17 @@ class RcStateService extends ChangeNotifier {
   }
 
   void _listenEvents() {
-    _subscription?.cancel();
+    if (_subscription != null) return; // already listening
     _subscription = _eventChannel.receiveBroadcastStream().listen(
       (dynamic event) {
         if (event is Map) {
           final now = DateTime.now();
           if (now.difference(_lastEmit) >= _minInterval) {
             _state = RcState.fromMap(event);
-            _connected = true;
+            if (!_connected) {
+              _connected = true;
+              _error = null;
+            }
             _lastEmit = now;
             notifyListeners();
           }

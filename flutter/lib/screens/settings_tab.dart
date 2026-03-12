@@ -23,14 +23,6 @@ class SettingsTab extends StatefulWidget {
 
 class _SettingsTabState extends State<SettingsTab> {
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<RcStateService>().start();
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     final rcService = context.watch<RcStateService>();
     final picoService = context.watch<PicoService>();
@@ -45,12 +37,31 @@ class _SettingsTabState extends State<SettingsTab> {
           // ── Status ─────────────────────────────────────────────────────
           Text('Status', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          _StatusRow(
-            label: 'RC Input',
-            connected: rcService.connected,
-            detail: rcService.connected
-                ? 'Connected'
-                : (rcService.error ?? 'No device'),
+          Row(
+            children: [
+              Expanded(
+                child: _StatusRow(
+                  label: 'RC Input',
+                  connected: rcService.connected,
+                  detail: rcService.connected
+                      ? 'Connected'
+                      : (rcService.error ?? 'No device'),
+                ),
+              ),
+              if (!rcService.connected)
+                SizedBox(
+                  height: 28,
+                  child: TextButton.icon(
+                    onPressed: () => rcService.reconnect(),
+                    icon: const Icon(Icons.refresh, size: 14),
+                    label: const Text('Reconnect', style: TextStyle(fontSize: 11)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: Size.zero,
+                    ),
+                  ),
+                ),
+            ],
           ),
           _StatusRow(
             label: 'Pico',

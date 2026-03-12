@@ -29,12 +29,14 @@ void main() async {
   final announceService = AnnouncementService(wsPort: 8080);
   final picoService = PicoService();
   final gyroService = GyroService();
+  final rcService = RcStateService();
 
   // Auto-start
   wsTransport.start();
   announceService.start();
   picoService.start();
   gyroService.start();
+  rcService.start();
 
   // Auto-start BT if a saved target exists
   final prefs = await SharedPreferences.getInstance();
@@ -48,7 +50,7 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => RcStateService()),
+        ChangeNotifierProvider.value(value: rcService),
         ChangeNotifierProvider.value(value: picoService),
         ChangeNotifierProvider.value(value: gyroService),
         ChangeNotifierProvider.value(value: announceService),

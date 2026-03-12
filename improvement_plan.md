@@ -75,21 +75,16 @@ Fixes:
 
 Improvements:
 
-1. RC input takes a few tries with app restarting to be captured.
+1. ~~DONE~~ RC input takes a few tries with app restarting to be captured.
 
-   **Root cause analysis:**
-   - `RcStateService.start()` calls native `start()` only once — no retry logic.
-   - RC startup only happens in `MainScreen.initState()` via `addPostFrameCallback`, which is asynchronous and delayed.
-   - If USB device isn't enumerated yet or permission dialog is pending, the single `start()` call fails silently.
-   - Pico has a 5-attempt retry loop with 3s delays, but RC does not have equivalent logic.
-   - USB permission is requested asynchronously, but the result isn't awaited before giving up.
-
-   **Plan of approach:**
-   - [ ] Add retry logic to `RcStateService.start()` similar to PicoService: 5 attempts with 3s delays.
-   - [ ] Move RC initialization to `main.dart` so it starts earlier (alongside PicoService).
-   - [ ] In `RcPlugin.kt`, add a USB device attached broadcast receiver to automatically retry when a new USB device is connected.
-   - [ ] Add a "Reconnect" button in the Flutter settings tab for manual retry.
-   - [ ] Log each retry attempt with a clear reason (device not found / permission pending / claim failed).
+   **What was done:**
+   - Added retry logic in `RcPlugin.kt`: up to 5 attempts with 3s delays when device not found or reader fails to start. Retry counter resets on success or manual reconnect.
+   - Added `USB_DEVICE_ATTACHED` broadcast receiver in `RcPlugin.kt` — automatically retries `handleStart()` when a new USB device is plugged in (covers late enumeration).
+   - Moved RC initialization from `SettingsTab.initState()` to `main.dart` — `rcService.start()` now runs at app launch alongside Pico/Gyro services.
+   - Added `reconnect` method channel command — stops existing reader, resets retry counter, and does a fresh start cycle. Exposed as `RcStateService.reconnect()` in Dart.
+   - Added "Reconnect" button in Settings tab next to RC Input status row (shown only when disconnected).
+   - Event stream listener is now idempotent (won't double-subscribe) and starts even on initial failure, so events flow immediately when Kotlin retries succeed later.
+   - Each retry attempt is logged with attempt number (`RC start: scheduling retry 2/5 in 3000ms`).
 
 2. ~~DONE (Phase 1)~~ Implement extendable configuration for adding more physical input devices (buttons/axes).
 

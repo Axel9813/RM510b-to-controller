@@ -19,6 +19,8 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
     companion object {
         private const val TAG = "RcPlugin"
         private const val ACTION_USB_PERMISSION = "com.dji.rc_to_controller.USB_PERMISSION"
+        private const val MAX_RETRY = 5
+        private const val RETRY_DELAY_MS = 3000L
     }
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -27,6 +29,8 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
     private var reader: RcUsbReader? = null
     private var eventSink: EventChannel.EventSink? = null
     private var lastError: String? = null
+    @Volatile private var retryPending = false
+    @Volatile private var startRequested = false
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -43,9 +47,25 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
         }
     }
 
+    private val usbAttachReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
+                val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+                Log.i(TAG, "USB device attached: VID=${device?.vendorId?.toString(16)} PID=${device?.productId?.toString(16)}")
+                // If we previously requested start but device wasn't found, try again
+                if (startRequested && reader?.isRunning != true) {
+                    Log.i(TAG, "Auto-retrying RC start after USB attach")
+                    handleStart()
+                }
+            }
+        }
+    }
+
     init {
-        val filter = IntentFilter(ACTION_USB_PERMISSION)
-        context.registerReceiver(usbPermissionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        val permFilter = IntentFilter(ACTION_USB_PERMISSION)
+        context.registerReceiver(usbPermissionReceiver, permFilter, Context.RECEIVER_NOT_EXPORTED)
+        val attachFilter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+        context.registerReceiver(usbAttachReceiver, attachFilter, Context.RECEIVER_NOT_EXPORTED)
     }
 
     // --- MethodChannel.MethodCallHandler ---
@@ -60,6 +80,12 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
                 handleStop()
                 result.success(true)
             }
+            "reconnect" -> {
+                handleStop()
+                retryCount = 0
+                val started = handleStart()
+                result.success(started)
+            }
             "status" -> {
                 result.success(getStatus())
             }
@@ -68,6 +94,7 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
     }
 
     private fun handleStart(): Boolean {
+        startRequested = true
         if (reader?.isRunning == true) return true
 
         val tempReader = RcUsbReader(usbManager, ::onRcState, ::onReaderError)
@@ -75,6 +102,7 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
 
         if (device == null) {
             lastError = "DJI RC joystick not found"
+            scheduleRetry()
             return false
         }
 
@@ -89,18 +117,43 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
         return startReader()
     }
 
+    private var retryCount = 0
+
+    private fun scheduleRetry() {
+        if (retryPending || reader?.isRunning == true) return
+        if (retryCount >= MAX_RETRY) {
+            Log.w(TAG, "RC start: max retries ($MAX_RETRY) reached, giving up. Use reconnect to try again.")
+            return
+        }
+        retryPending = true
+        retryCount++
+        Log.i(TAG, "RC start: scheduling retry $retryCount/$MAX_RETRY in ${RETRY_DELAY_MS}ms")
+        mainHandler.postDelayed({
+            retryPending = false
+            if (reader?.isRunning != true && startRequested) {
+                handleStart()
+            }
+        }, RETRY_DELAY_MS)
+    }
+
     private fun startReader(): Boolean {
         val r = reader ?: return false
         val ok = r.start()
         if (!ok) {
             lastError = "Failed to start USB reader"
+            scheduleRetry()
         } else {
             lastError = null
+            retryCount = 0
         }
         return ok
     }
 
     private fun handleStop() {
+        startRequested = false
+        retryCount = 0
+        mainHandler.removeCallbacksAndMessages(null)
+        retryPending = false
         reader?.stop()
         reader = null
     }
@@ -143,8 +196,7 @@ class RcPlugin(private val context: Context) : MethodChannel.MethodCallHandler, 
 
     fun dispose() {
         handleStop()
-        try {
-            context.unregisterReceiver(usbPermissionReceiver)
-        } catch (_: Exception) {}
+        try { context.unregisterReceiver(usbPermissionReceiver) } catch (_: Exception) {}
+        try { context.unregisterReceiver(usbAttachReceiver) } catch (_: Exception) {}
     }
 }
