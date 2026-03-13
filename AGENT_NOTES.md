@@ -34,7 +34,7 @@ WebSocketService (50 Hz send, 3-phase reconnect, hello handshake), LayoutStorage
 
 ### Python Server — Phase 2 ✅
 main.py, server.py (FastAPI /ws/rc /ws/monitor + REST), config_manager.py, input_router.py,
-output_manager.py, vjoy_handler.py, system_actions.py, discovery.py, full web UI frontend
+output_manager.py, gamepad_output.py, system_actions.py, discovery.py, full web UI frontend
 
 ---
 

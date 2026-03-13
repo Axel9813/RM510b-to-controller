@@ -21,6 +21,7 @@ class MainActivity : FlutterActivity() {
     private var picoPlugin: PicoPlugin? = null
     private var sensorPlugin: SensorPlugin? = null
     private var btPlugin: BluetoothPlugin? = null
+    private var hapticPlugin: HapticPlugin? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -55,6 +56,11 @@ class MainActivity : FlutterActivity() {
         btPlugin = bt
         MethodChannel(messenger, BluetoothPlugin.METHOD_CHANNEL).setMethodCallHandler(bt)
         EventChannel(messenger, BluetoothPlugin.EVENT_CHANNEL).setStreamHandler(bt)
+
+        // Haptic feedback (vibration for gamepad rumble)
+        val haptic = HapticPlugin(this)
+        hapticPlugin = haptic
+        MethodChannel(messenger, HapticPlugin.METHOD_CHANNEL).setMethodCallHandler(haptic)
 
     }
 

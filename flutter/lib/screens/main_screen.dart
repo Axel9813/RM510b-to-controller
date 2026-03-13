@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/layout_storage_service.dart';
+import '../services/haptic_service.dart';
 import '../services/rc_state_service.dart';
 import '../services/pico_service.dart';
 import '../services/gyro_service.dart';
@@ -23,6 +24,7 @@ class _MainScreenState extends State<MainScreen> {
   VoidCallback? _rcListener;
   VoidCallback? _gyroListener;
   StreamSubscription? _incomingSub;
+  final _haptic = HapticService();
 
   // Store service refs for safe dispose (context may be deactivated)
   RcStateService? _rcService;
@@ -71,6 +73,10 @@ class _MainScreenState extends State<MainScreen> {
           if (sensorType != null) {
             gyroService.setSensorType(sensorType);
           }
+        } else if (type == 'rumble') {
+          final large = msg['large'] as int? ?? 0;
+          final small = msg['small'] as int? ?? 0;
+          _haptic.rumble(large, small);
         }
       });
 

@@ -10,7 +10,7 @@ import logging
 from typing import Any, Callable, Optional
 
 from system_actions import SystemActions
-from vjoy_handler import VJoyHandler
+from gamepad_output import GamepadOutput
 
 log = logging.getLogger(__name__)
 
@@ -18,10 +18,10 @@ log = logging.getLogger(__name__)
 class OutputManager:
     def __init__(
         self,
-        vjoy: VJoyHandler,
+        gamepad: GamepadOutput,
         sys_actions: SystemActions,
     ) -> None:
-        self._vjoy = vjoy
+        self._gamepad = gamepad
         self._sys = sys_actions
 
         # element_registry section from active profile: {id: {...}}
@@ -278,13 +278,13 @@ class OutputManager:
             return
         if action == "vjoy_button":
             btn = int(mapping.get("button", 1))
-            self._vjoy.set_button(btn, value > 0.5)
+            self._gamepad.set_button(btn, value > 0.5)
         elif action == "vjoy_axis":
             axis = mapping.get("axis", "X")
             invert = bool(mapping.get("invert", False))
             # Slider 0.0-1.0 → RC-equivalent ±660
             rc_val = int((value - 0.5) * 2 * 660)
-            self._vjoy.set_axis(axis, rc_val, invert)
+            self._gamepad.set_axis(axis, rc_val, invert)
         elif action == "key":
             keys: list[str] = mapping.get("keys", [])
             self._sys.send_key_combo(keys, pressed=True)

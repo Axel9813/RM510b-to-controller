@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 # Imports (after logging so module-level log messages show up)
 # ---------------------------------------------------------------------------
 from config_manager import config as cfg
+from gamepad_output import create_output, detect_available_drivers
 from typing import Optional
 
 from discovery import RcDiscovery, RcEntry, UDP_ANNOUNCE_PORT
@@ -48,7 +49,9 @@ def _print_startup_banner(web_port: int, rc_port: int) -> None:
     print(f"  Web UI:         http://localhost:{web_port}/")
     print(f"  Monitor WS:     ws://localhost:{web_port}/ws/monitor")
     print(f"  Profile:        {cfg.active_profile_name()}")
-    print(f"  vJoy:           {'active' if srv.vjoy.active else 'not available'}")
+    drivers = detect_available_drivers()
+    print(f"  Output:         {srv.gamepad.driver_name} ({'active' if srv.gamepad.active else 'not available'})")
+    print(f"  Drivers:        {', '.join(drivers) if drivers else 'none installed'}")
     print()
     print("  Connection mode: OUTBOUND (PC connects to RC)")
     print(f"  RC WebSocket port:    {rc_port}")
@@ -81,9 +84,12 @@ async def _main() -> None:
     cfg.on_profile_changed(srv._on_profile_changed)
 
     # ------------------------------------------------------------------
-    # Initialise vJoy
+    # Initialise gamepad output (vJoy / ViGEm Xbox / ViGEm DS4)
     # ------------------------------------------------------------------
-    srv.vjoy.start(vjoy_device_id)
+    output_driver: str = server_cfg.get("output_driver", "vjoy")
+    srv.gamepad = create_output(output_driver)
+    srv.gamepad.register_rumble_callback(srv._on_rumble)
+    srv.gamepad.start(device_id=vjoy_device_id)
 
     # ------------------------------------------------------------------
     # Build InputRouter and OutputManager from active profile
@@ -176,7 +182,7 @@ async def _main() -> None:
     finally:
         transport_mgr.stop_all()
         discovery.stop()
-        srv.vjoy.stop()
+        srv.gamepad.stop()
         log.info("Server stopped.")
 
 

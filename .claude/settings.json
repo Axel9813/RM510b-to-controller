@@ -8,7 +8,19 @@
       "Bash(python upload_to_pico.py config.json)",
       "Bash(python -c \"import ast; ast.parse\\(open\\(''input_router.py''\\).read\\(\\)\\); print\\(''input_router.py OK''\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\(''config_manager.py''\\).read\\(\\)\\); print\\(''config_manager.py OK''\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(''server.py''\\).read\\(\\)\\); print\\(''server.py OK''\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''server.py''\\).read\\(\\)\\); print\\(''server.py OK''\\)\")",
+      "WebFetch(domain:pypi.org)",
+      "Bash(python -c \"import gamepad_output; print\\(''gamepad_output OK''\\)\")",
+      "Bash(python -c \"import config_manager; print\\(''config_manager OK''\\)\")",
+      "Bash(python -c \"import input_router; print\\(''input_router OK''\\)\")",
+      "Bash(python -c \"import server; print\\(''server OK''\\)\")",
+      "Bash(python -c \"from gamepad_output import detect_available_drivers; print\\(''Available drivers:'', detect_available_drivers\\(\\)\\)\")",
+      "Bash(python -c \"import vgamepad; print\\(vgamepad.__file__\\)\")",
+      "Bash(python -c \"import site; print\\(site.getsitepackages\\(\\)\\)\")",
+      "Read(//c/Users/Александр/AppData/Local/Programs/Python/Python314/Lib/site-packages/vgamepad/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\projects\\rc_to_controller\\python\\server"
     ]
   }
 }

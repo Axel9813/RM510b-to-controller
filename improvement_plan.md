@@ -213,25 +213,33 @@ Improvements:
    - [ ] Sync color config to server via element registry.
    - **Estimated scope:** ~200 lines Dart + ~50 lines Python.
 
-6. Implement support for ViGEm Bus Driver for better compatibility with games.
+6. ~~DONE~~ Implement support for ViGEm Bus Driver for better compatibility with games.
 
-   **Research findings:**
-   - ViGEm emulates native Xbox 360 / DualShock 4 controllers — ~95% game compatibility vs vJoy's ~70%.
-   - Python library: `vigem-client` (COM wrapper).
-   - Current `vjoy_handler.py` has no abstraction layer — all vJoy-specific.
-   - ViGEm requires ViGEmBus driver installation (may need test-signing on some Windows 10 builds).
-
-   **Plan of approach:**
-   - [ ] Create abstract `GamepadOutput` base class with `set_axis()`, `set_button()`, `start()`, `stop()`.
-   - [ ] Refactor existing `VJoyHandler` into `VJoyOutput(GamepadOutput)`.
-   - [ ] Create `ViGEmOutput(GamepadOutput)` supporting Xbox 360 and DualShock 4 profiles.
-   - [ ] Map RC axis names to ViGEm axis names (LX, LY, RX, RY, LT, RT).
-   - [ ] Add `output_driver` setting to `server.json` ("vjoy" | "vigem").
-   - [ ] Add `output_profile` setting ("xbox360" | "dualshock4") for ViGEm.
-   - [ ] Auto-detect installed drivers: try importing `pyvjoy` and `vigem_client`.
-   - [ ] Add driver selector to the PC frontend settings UI.
-   - [ ] Add `vigem-client>=2.0.0` to requirements.txt as optional dependency.
-   - **Estimated scope:** ~200 lines Python.
+   **What was done:**
+   - Created abstract `GamepadOutput` base class in `python/server/gamepad_output.py` with `set_axis()`, `set_button()`, `start()`, `stop()`, `active`, `error`, `driver_name`.
+   - Implemented `VJoyOutput(GamepadOutput)` — moved logic from `vjoy_handler.py` into new class.
+   - Implemented `ViGEmOutput(GamepadOutput)` — supports both Xbox 360 (`VX360Gamepad`) and DualShock 4 (`VDS4Gamepad`) via `vgamepad` library.
+   - `NullOutput` fallback when no driver is installed.
+   - Three driver modes: `vjoy`, `vigem_xbox`, `vigem_ds4` — selectable at runtime.
+   - **Trigger axes (LT/RT):** Center position = released, full deflection either way = fully pressed (`abs(value)` scaled 0–660 → 0.0–1.0).
+   - **DS4 DPad:** Tracked as 4 individual buttons, combined into composite direction (N/S/E/W/NE/NW/SE/SW/NONE) via `_apply_ds4_dpad()`.
+   - **Per-driver mapping storage:** Profile stores `driver_mappings` dict with saved mappings per driver. Switching drivers saves current mappings for old driver and loads saved mappings for new driver. No reconfiguration needed when switching back.
+   - **Auto-detection:** `detect_available_drivers()` checks for `pyvjoy` and `vgamepad` imports.
+   - `DRIVER_INFO` dict exposed via REST API — frontend uses it for driver-aware axis/button dropdowns.
+   - **Server:** `POST /api/config/driver` switches driver live (stops old gamepad, creates new one, swaps mappings, rebuilds router). `GET /api/config/driver` returns current driver and available options.
+   - **Frontend:** Driver selector dropdown in new "Output Driver" config section. Mapping editor shows driver-appropriate axis names (vJoy: X/Y/Z/RX/RY/RZ/SL0/SL1, Xbox: LX/LY/RX/RY/LT/RT, DS4: same). Button selector shows numbered input for vJoy (1–128) or named dropdown for Xbox/DS4 (A/B/X/Y/LB/RB/etc.). Trigger axes marked with "(trigger)" hint.
+   - **Status pill:** Shows active driver name (vJoy/Xbox 360/DS4) instead of hardcoded "vJoy".
+   - Updated `input_router.py`, `output_manager.py`, `server.py`, `main.py` to use `GamepadOutput` interface instead of `VJoyHandler`.
+   - Deleted old `vjoy_handler.py` (fully superseded by `gamepad_output.py`).
+   - **Rumble/haptic feedback:** ViGEm rumble events from games are forwarded to the DJI RC's built-in vibration motor.
+     - `ViGEmOutput._register_notification()` registers a vgamepad callback that fires when a game sends rumble commands (large + small motor, 0–255).
+     - Callback runs on ViGEm's background thread — uses `loop.call_soon_threadsafe()` to schedule transport send on the asyncio event loop.
+     - `server.py::_on_rumble()` sends `{"type": "rumble", "large": N, "small": N}` to the RC via the active transport.
+     - Flutter `main_screen.dart` handles incoming `rumble` messages and calls `HapticService.rumble()`.
+     - `HapticService` (Dart) wraps a platform channel to `HapticPlugin` (Kotlin).
+     - `HapticPlugin.kt` uses Android `Vibrator` with `VibrationEffect.createOneShot()` — 5-second duration, refreshed every 4 seconds for sustained vibration without pulsing. Amplitude = `max(large, small)` clamped to 1–255. Stops immediately when motors go to 0.
+     - `VIBRATE` permission added to `AndroidManifest.xml`.
+   - To enable ViGEm: `pip install vgamepad` (auto-installs ViGEmBus driver).
 
 7. Implement support for more than one vJoy device in parallel to increase amount of axes that can be used.
 

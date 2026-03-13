@@ -28,10 +28,13 @@ from fastapi.staticfiles import StaticFiles
 from transport import TransportManager
 
 from config_manager import config as cfg
+from gamepad_output import (
+    GamepadOutput, create_output, detect_available_drivers,
+    DRIVER_INFO, ALL_DRIVERS,
+)
 from input_router import InputRouter
 from output_manager import OutputManager
 from system_actions import SystemActions
-from vjoy_handler import VJoyHandler
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +43,7 @@ FRONTEND_DIR = Path(__file__).parent / "frontend"
 # ---------------------------------------------------------------------------
 # Shared singletons (initialised in main.py before uvicorn starts)
 # ---------------------------------------------------------------------------
-vjoy = VJoyHandler()
+gamepad: GamepadOutput = None  # type: ignore[assignment]  # set in main.py
 sys_actions = SystemActions()
 input_router: InputRouter = None  # type: ignore[assignment]
 output_mgr: OutputManager = None  # type: ignore[assignment]
@@ -94,24 +97,41 @@ if FRONTEND_DIR.exists():
 
 @app.on_event("startup")
 async def _startup() -> None:
+    global _event_loop
+    _event_loop = asyncio.get_running_loop()
     asyncio.create_task(_monitor_broadcast_loop())
     log.info("Monitor broadcast task started.")
 
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    vjoy.stop()
+    gamepad.stop()
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _on_rumble(large_motor: int, small_motor: int) -> None:
+    """Forward rumble events from ViGEm to the RC via transport.
+    Called from ViGEm's background thread — must use call_soon_threadsafe."""
+    if _transport_mgr is None or not _transport_mgr.connected:
+        return
+    loop = _event_loop
+    if loop is None or loop.is_closed():
+        return
+    msg = {"type": "rumble", "large": large_motor, "small": small_motor}
+    loop.call_soon_threadsafe(asyncio.ensure_future, _transport_mgr.send(msg))
+
+
 def _rebuild_router() -> None:
     """Re-instantiate InputRouter from current active profile mappings."""
     global input_router
     input_router = InputRouter(
-        cfg.input_mappings(), vjoy, sys_actions,
+        cfg.input_mappings(), gamepad, sys_actions,
         gyro_config=cfg.gyro_config(),
         pico_hardware=cfg.pico_hardware(),
     )
@@ -121,7 +141,7 @@ def _rebuild_router() -> None:
 def _rebuild_output_manager() -> None:
     """Re-instantiate OutputManager from current active profile registry."""
     global output_mgr
-    output_mgr = OutputManager(vjoy, sys_actions)
+    output_mgr = OutputManager(gamepad, sys_actions)
     output_mgr.load(
         registry=cfg.element_registry(),
         save_cb=cfg.save_active_profile,
@@ -161,8 +181,9 @@ async def _monitor_broadcast_loop() -> None:
         msg = json.dumps({
             "type": "monitor_update",
             "rc_connected": _rc_connected,
-            "vjoy_active": vjoy.active,
-            "vjoy_error": vjoy.error,
+            "vjoy_active": gamepad.active,
+            "vjoy_error": gamepad.error,
+            "output_driver": gamepad.driver_name,
             "rc_state": _last_rc_state,
             "transport_type": _transport_mgr.active_type if _transport_mgr else None,
         })
@@ -234,8 +255,9 @@ async def ws_monitor(websocket: WebSocket) -> None:
         "type": "initial_state",
         "rc_connected": _rc_connected,
         "transport_type": _transport_mgr.active_type if _transport_mgr else None,
-        "vjoy_active": vjoy.active,
-        "vjoy_error": vjoy.error,
+        "vjoy_active": gamepad.active,
+        "vjoy_error": gamepad.error,
+        "output_driver": gamepad.driver_name,
         "rc_state": _last_rc_state,
         "registry": output_mgr.get_registry(),
         "grid_cols": grid_cols,
@@ -278,8 +300,11 @@ async def api_status() -> JSONResponse:
     return JSONResponse({
         "rc_connected": _rc_connected,
         "last_seq": _last_seq,
-        "vjoy_active": vjoy.active,
-        "vjoy_error": vjoy.error,
+        "vjoy_active": gamepad.active,
+        "vjoy_error": gamepad.error,
+        "output_driver": gamepad.driver_name,
+        "available_drivers": detect_available_drivers(),
+        "driver_info": DRIVER_INFO,
         "active_profile": cfg.active_profile_name(),
         "profiles": cfg.list_profiles(),
         "mappings": cfg.input_mappings(),
@@ -432,6 +457,56 @@ async def api_gyro_sensor_type(body: dict[str, Any]) -> JSONResponse:
         input_router.reload_gyro_config(gyro)
         return JSONResponse({"status": "ok"})
     raise HTTPException(503, "RC not connected")
+
+
+# ---------------------------------------------------------------------------
+# REST — Output Driver
+# ---------------------------------------------------------------------------
+
+@app.post("/api/config/driver")
+async def api_set_driver(body: dict[str, Any]) -> JSONResponse:
+    """Switch gamepad output driver. Saves current mappings for old driver,
+    loads saved mappings for new driver."""
+    global gamepad
+    new_driver = body.get("driver", "")
+    if new_driver not in ALL_DRIVERS:
+        raise HTTPException(400, f"Unknown driver: {new_driver}")
+
+    old_driver = cfg.output_driver()
+    if new_driver == old_driver:
+        return JSONResponse({"status": "unchanged", "driver": old_driver})
+
+    # Save current mappings under old driver, load new driver's mappings
+    cfg.switch_driver_mappings(old_driver, new_driver)
+
+    # Stop old gamepad, create and start new one
+    gamepad.stop()
+    gamepad = create_output(new_driver)
+    gamepad.register_rumble_callback(_on_rumble)
+    device_id = cfg.server_cfg().get("vjoy_device_id", 1)
+    gamepad.start(device_id=device_id)
+
+    # Persist driver choice
+    cfg.set_output_driver(new_driver)
+
+    # Rebuild router with new mappings and new gamepad
+    _rebuild_router()
+
+    return JSONResponse({
+        "status": "switched",
+        "driver": new_driver,
+        "mappings": cfg.input_mappings(),
+        "driver_info": DRIVER_INFO.get(new_driver, {}),
+    })
+
+
+@app.get("/api/config/driver")
+async def api_get_driver() -> JSONResponse:
+    return JSONResponse({
+        "driver": cfg.output_driver(),
+        "available": detect_available_drivers(),
+        "driver_info": DRIVER_INFO,
+    })
 
 
 # ---------------------------------------------------------------------------

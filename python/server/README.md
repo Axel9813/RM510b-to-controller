@@ -48,7 +48,7 @@ python/server/
 ├── config_manager.py    — singleton; loads/saves server.json + profiles/
 ├── input_router.py      — rc_state fields → vJoy / keyboard actions
 ├── output_manager.py    — LED state, element registry, push to RC
-├── vjoy_handler.py      — pyvjoy wrapper (graceful no-op if driver absent)
+├── gamepad_output.py    — gamepad abstraction (vJoy / ViGEm Xbox 360 / DS4)
 ├── system_actions.py    — pynput media keys, key combos, volume
 ├── discovery.py         — UDP broadcast responder (auto-discovery)
 ├── requirements.txt

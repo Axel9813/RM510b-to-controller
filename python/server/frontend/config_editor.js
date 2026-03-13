@@ -50,14 +50,19 @@ const ConfigEditor = (() => {
 
   const ACTION_TYPES = [
     { value: "none", label: "None" },
-    { value: "vjoy_axis", label: "vJoy Axis" },
-    { value: "vjoy_button", label: "vJoy Button" },
+    { value: "vjoy_axis", label: "Gamepad Axis" },
+    { value: "vjoy_button", label: "Gamepad Button" },
     { value: "key", label: "Key Combo" },
     { value: "system", label: "System Action" },
     { value: "mouse_move", label: "Mouse Movement" },
   ];
 
   const VJOY_AXES = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Sl0", "Sl1"];
+
+  // Driver info — populated from server
+  let _outputDriver = "vjoy";
+  let _availableDrivers = ["vjoy"];
+  let _driverInfo = {};
   const SYSTEM_FNS = [
     "media_play_pause",
     "media_next",
@@ -177,6 +182,9 @@ const ConfigEditor = (() => {
         _picoHardware = status.pico_hardware;
         RCV.setPicoHardware(_picoHardware);
       }
+      if (status.output_driver) _outputDriver = status.output_driver;
+      if (status.available_drivers) _availableDrivers = status.available_drivers;
+      if (status.driver_info) _driverInfo = status.driver_info;
       renderAll();
     } catch (e) {
       window.App?.toast("Failed to load config: " + e.message, "error");
@@ -185,6 +193,7 @@ const ConfigEditor = (() => {
 
   function renderAll() {
     renderProfiles();
+    renderDriverSelector();
     renderMappings();
     renderExtras();
     renderElements();
@@ -323,15 +332,86 @@ const ConfigEditor = (() => {
       });
   }
 
+  // ---- Driver selector -------------------------------------------------------
+
+  function getDriverAxes() {
+    const info = _driverInfo[_outputDriver];
+    if (info) return info.axes || [];
+    return VJOY_AXES;
+  }
+
+  function getDriverButtons() {
+    const info = _driverInfo[_outputDriver];
+    if (info) return info.buttons || [];
+    return Array.from({ length: 128 }, (_, i) => i + 1);
+  }
+
+  function getDriverButtonType() {
+    const info = _driverInfo[_outputDriver];
+    return info?.button_type || "number";
+  }
+
+  function getDriverLabel() {
+    const info = _driverInfo[_outputDriver];
+    return info?.label || _outputDriver;
+  }
+
+  function isDriverTrigger(axisName) {
+    const info = _driverInfo[_outputDriver];
+    return (info?.triggers || []).includes(axisName);
+  }
+
+  function renderDriverSelector() {
+    const sel = document.getElementById("driver-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    for (const d of _availableDrivers) {
+      const info = _driverInfo[d] || {};
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = info.label || d;
+      if (d === _outputDriver) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    const statusEl = document.getElementById("driver-status");
+    if (statusEl) {
+      const axes = getDriverAxes();
+      const btns = getDriverButtons();
+      statusEl.textContent = `${axes.length} axes, ${btns.length} buttons`;
+    }
+  }
+
+  function initDriverHandler() {
+    const sel = document.getElementById("driver-select");
+    if (!sel || sel._hasListener) return;
+    sel._hasListener = true;
+    sel.addEventListener("change", async () => {
+      const newDriver = sel.value;
+      if (newDriver === _outputDriver) return;
+      try {
+        const result = await apiPost("/api/config/driver", { driver: newDriver });
+        _outputDriver = newDriver;
+        _mappings = result.mappings || {};
+        window.App?.toast(`Switched to ${_driverInfo[newDriver]?.label || newDriver}`, "success");
+        renderAll();
+      } catch (e) {
+        window.App?.toast(e.message, "error");
+        sel.value = _outputDriver; // revert
+      }
+    });
+  }
+
   // ---- Input Mappings — shared helpers --------------------------------------
 
   function actionBadgeHtml(mapping) {
     const act = mapping?.action || "none";
     if (act === "none") return '<span class="action-badge none">none</span>';
     let detail = "";
-    if (act === "vjoy_axis")
-      detail = `${mapping.axis || "?"} ${mapping.invert ? "(inv)" : ""}`;
-    if (act === "vjoy_button") detail = `btn ${mapping.button || "?"}`;
+    if (act === "vjoy_axis") {
+      const ax = mapping.axis || "?";
+      detail = `${ax}${isDriverTrigger(ax) ? " (trig)" : ""} ${mapping.invert ? "(inv)" : ""}`;
+    }
+    if (act === "vjoy_button") detail = `${mapping.button || "?"}`;
     if (act === "key") detail = (mapping.keys || []).join("+");
     if (act === "system") detail = mapping.fn || "?";
     if (act === "mouse_move")
@@ -477,12 +557,17 @@ const ConfigEditor = (() => {
     if (actionType === "none") return;
 
     if (actionType === "vjoy_axis") {
-      const curAxis = currentMapping?.axis || "X";
+      const axes = getDriverAxes();
+      const curAxis = currentMapping?.axis || axes[0] || "X";
+      const triggerHint = isDriverTrigger(curAxis)
+        ? `<div class="form-note">Trigger axis: center = released, full deflection either way = fully pressed.</div>`
+        : "";
       container.innerHTML = `
         <div class="form-row">
-          <label>vJoy Axis</label>
-          <select id="af-axis">${VJOY_AXES.map((a) => `<option value="${a}"${curAxis === a ? " selected" : ""}>${a}</option>`).join("")}</select>
+          <label>${getDriverLabel()} Axis</label>
+          <select id="af-axis">${axes.map((a) => `<option value="${a}"${curAxis === a ? " selected" : ""}>${a}${isDriverTrigger(a) ? " (trigger)" : ""}</option>`).join("")}</select>
         </div>
+        ${triggerHint}
         <div class="form-row">
           <label><input type="checkbox" id="af-invert" ${currentMapping?.invert ? "checked" : ""} /> Invert axis</label>
         </div>
@@ -491,6 +576,10 @@ const ConfigEditor = (() => {
           <input type="number" id="af-dz" min="0" max="0.5" step="0.01" value="${currentMapping?.dead_zone ?? 0.02}" />
         </div>
       `;
+      // Update trigger hint when axis selection changes
+      document.getElementById("af-axis")?.addEventListener("change", (e) => {
+        renderActionFields(actionType, { ...currentMapping, axis: e.target.value });
+      });
     } else if (actionType === "mouse_move") {
       container.innerHTML = `
         <div class="form-row">
@@ -513,12 +602,24 @@ const ConfigEditor = (() => {
         </div>
       `;
     } else if (actionType === "vjoy_button") {
-      container.innerHTML = `
-        <div class="form-row">
-          <label>Button ID (1–128)</label>
-          <input type="number" id="af-btn-id" min="1" max="128" value="${currentMapping?.button ?? 1}" />
-        </div>
-      `;
+      const btnType = getDriverButtonType();
+      const buttons = getDriverButtons();
+      const curBtn = currentMapping?.button ?? buttons[0] ?? 1;
+      if (btnType === "name") {
+        container.innerHTML = `
+          <div class="form-row">
+            <label>${getDriverLabel()} Button</label>
+            <select id="af-btn-id">${buttons.map((b) => `<option value="${b}"${String(curBtn) === String(b) ? " selected" : ""}>${b}</option>`).join("")}</select>
+          </div>
+        `;
+      } else {
+        container.innerHTML = `
+          <div class="form-row">
+            <label>Button ID (1–${buttons.length})</label>
+            <input type="number" id="af-btn-id" min="1" max="${buttons.length}" value="${curBtn}" />
+          </div>
+        `;
+      }
     } else if (actionType === "key") {
       container.innerHTML = `
         <div class="form-row">
@@ -560,11 +661,14 @@ const ConfigEditor = (() => {
           document.getElementById("af-dz")?.value ?? "0.05",
         ),
       };
-    if (actionType === "vjoy_button")
+    if (actionType === "vjoy_button") {
+      const rawBtn = document.getElementById("af-btn-id")?.value ?? "1";
+      const btnType = getDriverButtonType();
       return {
         action: "vjoy_button",
-        button: parseInt(document.getElementById("af-btn-id")?.value ?? "1"),
+        button: btnType === "name" ? rawBtn : parseInt(rawBtn),
       };
+    }
     if (actionType === "key")
       return {
         action: "key",
@@ -859,8 +963,9 @@ const ConfigEditor = (() => {
     const actionOpts = GYRO_AXIS_ACTIONS.map(a =>
       `<option value="${a.value}"${cfg.action === a.value ? " selected" : ""}>${a.label}</option>`
     ).join("");
-    const axisOpts = VJOY_AXES.map(a =>
-      `<option value="${a}"${(cfg.vjoy_axis || "SL0") === a ? " selected" : ""}>${a}</option>`
+    const driverAxes = getDriverAxes();
+    const axisOpts = driverAxes.map(a =>
+      `<option value="${a}"${(cfg.vjoy_axis || driverAxes[0] || "SL0") === a ? " selected" : ""}>${a}</option>`
     ).join("");
 
     return `
@@ -940,6 +1045,7 @@ const ConfigEditor = (() => {
 
   async function init() {
     initProfileHandlers();
+    initDriverHandler();
     initSectionToggles();
     await loadAll();
   }

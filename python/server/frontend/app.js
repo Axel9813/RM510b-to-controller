@@ -110,12 +110,17 @@
     if (notice) notice.style.display = connected ? "none" : "";
   }
 
-  function setVJoyStatus(active, error) {
+  const _DRIVER_LABELS = {
+    vjoy: "vJoy", vigem_xbox: "Xbox 360", vigem_ds4: "DS4", none: "None",
+  };
+
+  function setVJoyStatus(active, error, driver) {
     const dot = document.getElementById("vjoy-status-dot");
     const lbl = document.getElementById("vjoy-status-label");
     if (!dot || !lbl) return;
     dot.className = "status-dot " + (active ? "active" : "warning");
-    let text = "vJoy: " + (active ? "active" : "inactive");
+    const driverLabel = _DRIVER_LABELS[driver] || driver || "Gamepad";
+    let text = driverLabel + ": " + (active ? "active" : "inactive");
     if (!active && error) text += " (" + error + ")";
     lbl.textContent = text;
   }
@@ -196,7 +201,7 @@
       case "initial_state":
         // Sent once on connect: full snapshot
         setRCStatus(msg.rc_connected ?? false, msg.transport_type);
-        setVJoyStatus(msg.vjoy_active ?? false, msg.vjoy_error);
+        setVJoyStatus(msg.vjoy_active ?? false, msg.vjoy_error, msg.output_driver);
         if (msg.active_profile) setProfile(msg.active_profile);
         if (msg.registry) ConfigEditor.loadRegistry(msg.registry, msg.grid_cols, msg.grid_rows);
         if (msg.rc_state) {
@@ -211,7 +216,7 @@
       case "monitor_update":
         // 20 Hz heartbeat
         setRCStatus(msg.rc_connected ?? false, msg.transport_type);
-        if (msg.vjoy_active !== undefined) setVJoyStatus(msg.vjoy_active, msg.vjoy_error);
+        if (msg.vjoy_active !== undefined) setVJoyStatus(msg.vjoy_active, msg.vjoy_error, msg.output_driver);
         if (msg.rc_state) {
           _lastRcState = msg.rc_state;
           // Pico connected = picoBitmask field exists in rc_state (may be 0 when no buttons pressed)

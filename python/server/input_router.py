@@ -6,7 +6,7 @@ Responsibilities:
   - Decode picoExtraBitmask using dynamic pico_hardware definition
   - Compare each field against the previous state to detect edges
   - Dispatch axis values and button press/release events to
-    VJoyHandler or SystemActions according to the active input_mappings
+    GamepadOutput or SystemActions according to the active input_mappings
   - Process pico analog axes (joystick) with configurable mapping
   - Process gyro axes (pitch/yaw/roll) with push-to-activate gating,
     per-axis sensitivity, deadzone, and mouse/vJoy output
@@ -18,7 +18,7 @@ import logging
 import math
 from typing import Any
 
-from vjoy_handler import VJoyHandler
+from gamepad_output import GamepadOutput
 from system_actions import SystemActions
 
 log = logging.getLogger(__name__)
@@ -84,13 +84,13 @@ class InputRouter:
     def __init__(
         self,
         mappings: dict[str, Any],
-        vjoy: VJoyHandler,
+        gamepad: GamepadOutput,
         sys_actions: SystemActions,
         gyro_config: dict[str, Any] | None = None,
         pico_hardware: dict[str, Any] | None = None,
     ) -> None:
         self._mappings = mappings
-        self._vjoy = vjoy
+        self._gamepad = gamepad
         self._sys = sys_actions
         self._gyro_config = gyro_config or {}
         # Previous flattened state for edge detection
@@ -199,7 +199,7 @@ class InputRouter:
                 # Always keep vjoy buttons in sync even with no change
                 mapping = self._mappings.get(field, {})
                 if mapping.get("action") == "vjoy_button":
-                    self._vjoy.set_button(int(mapping["button"]), curr)
+                    self._gamepad.set_button(mapping["button"], curr)
                 continue
             mapping = self._mappings.get(field)
             if mapping:
@@ -227,7 +227,7 @@ class InputRouter:
         for gyro_name in ("pitch", "yaw", "roll"):
             axis_cfg = cfg.get(gyro_name, {})
             if axis_cfg.get("action") == "vjoy_axis":
-                self._vjoy.set_axis(axis_cfg.get("vjoy_axis", "SL0"), 0)
+                self._gamepad.set_axis(axis_cfg.get("vjoy_axis", "SL0"), 0)
 
     def _process_gyro(self, flat: dict[str, Any], activate_btn: str | None) -> None:
         """Apply gyro → vJoy axis / mouse movement based on gyro_config."""
@@ -269,7 +269,7 @@ class InputRouter:
                 # Scale radians to ±660 range
                 vjoy_val = int(max(-660, min(660, value * _GYRO_RAD_TO_660)))
                 axis_name = axis_cfg.get("vjoy_axis", "SL0")
-                self._vjoy.set_axis(axis_name, vjoy_val)
+                self._gamepad.set_axis(axis_name, vjoy_val)
 
             elif action == "mouse_move":
                 mouse_axis = axis_cfg.get("mouse_axis", "x")
@@ -303,7 +303,7 @@ class InputRouter:
                         (normalized - math.copysign(dead_zone, normalized))
                         / (1.0 - dead_zone) * 660
                     )
-            self._vjoy.set_axis(axis_name, value, invert)
+            self._gamepad.set_axis(axis_name, value, invert)
 
         elif action == "mouse_move":
             dead_zone = float(mapping.get("dead_zone", 0.05))
@@ -336,8 +336,8 @@ class InputRouter:
             return
 
         if action == "vjoy_button":
-            button_id = int(mapping.get("button", 1))
-            self._vjoy.set_button(button_id, pressed)
+            button_id = mapping.get("button", 1)
+            self._gamepad.set_button(button_id, pressed)
 
         elif action == "key":
             # Fire combo on press only; release is handled inside send_key_combo

@@ -18,7 +18,7 @@
           </span>
           <span class="status-pill" id="vjoy-status-pill">
             <span class="status-dot" id="vjoy-status-dot"></span>
-            <span id="vjoy-status-label">vJoy: —</span>
+            <span id="vjoy-status-label">Gamepad: —</span>
           </span>
           <span class="profile-badge" id="profile-badge">profile: default</span>
         </div>
@@ -75,6 +75,24 @@
               <button class="btn btn-danger" id="btn-delete-profile">
                 Delete
               </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Output Driver -->
+        <section class="config-section" id="section-driver">
+          <div class="section-header" data-toggle="driver-body">
+            <span>&#x25B6; Output Driver</span>
+          </div>
+          <div class="section-body" id="driver-body">
+            <p class="hint">
+              Choose how the PC sees your RC — as a vJoy device, Xbox 360 controller, or PS4 controller.
+              Each driver has its own saved mappings.
+            </p>
+            <div class="driver-controls">
+              <label>Driver:</label>
+              <select id="driver-select"></select>
+              <span id="driver-status" style="margin-left:12px;font-size:12px;color:var(--text-dim)"></span>
             </div>
           </div>
         </section>

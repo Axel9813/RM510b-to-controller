@@ -23,6 +23,7 @@ DEFAULT_SERVER: dict[str, Any] = {
     "discovery_port": 8766,
     "tcp_beacon_port": 8767,
     "vjoy_device_id": 1,
+    "output_driver": "vjoy",
     "active_profile": "default",
 }
 
@@ -212,6 +213,27 @@ class ConfigManager:
     # ------------------------------------------------------------------
     # Convenience accessors into active profile sections
     # ------------------------------------------------------------------
+
+    def output_driver(self) -> str:
+        return self._server.get("output_driver", "vjoy")
+
+    def set_output_driver(self, driver: str) -> None:
+        self._server["output_driver"] = driver
+        self.save_server()
+
+    def switch_driver_mappings(self, old_driver: str, new_driver: str) -> dict[str, Any]:
+        """Save current input_mappings under old_driver, load new_driver's mappings.
+
+        Returns the new active mappings.
+        """
+        dm = self._profile.setdefault("driver_mappings", {})
+        # Save current mappings for the old driver
+        dm[old_driver] = dict(self._profile.get("input_mappings", {}))
+        # Load new driver's mappings (or empty dict if never configured)
+        new_mappings = dict(dm.get(new_driver, {}))
+        self._profile["input_mappings"] = new_mappings
+        self.save_active_profile()
+        return new_mappings
 
     def input_mappings(self) -> dict[str, Any]:
         return self._profile.setdefault("input_mappings", {})
